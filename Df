@@ -1,11 +1,7 @@
 --[[
     Rivals Script - UE Style
-    Anti-Cheat Bypass + Full Features
-    UI: LinoriaLib
+    Fixed Version
 ]]
-
--- Anti-Cheat Bypass
-assert(hookmetamethod, "Your executor doesn't support hookmetamethod.")
 
 if not game:IsLoaded() then
     game.Loaded:Wait()
@@ -16,17 +12,24 @@ local replicatedStorage = game:GetService("ReplicatedStorage")
 local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
 local workspace = game:GetService("Workspace")
-local starterGui = game:GetService("StarterGui")
 local localPlayer = players.LocalPlayer
 
--- Bypass analytics
-for i, v in getgc() do
-    if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalyticsPipelineController") then
-        hookfunction(v, function()
-            return task.wait(9e9) 
-        end)
+-- ━━━━━━━━━━━━━━━━━━━━━
+-- Fixed Analytics Bypass
+-- No more infinite loop!
+-- ━━━━━━━━━━━━━━━━━━━━━
+pcall(function()
+    for i, v in getgc(true) do
+        if typeof(v) == "function" then
+            local ok, src = pcall(debug.info, v, "s")
+            if ok and src and src:find("AnalyticsPipelineController") then
+                pcall(hookfunction, v, function()
+                    return -- Just return nothing
+                end)
+            end
+        end
     end
-end
+end)
 
 -- Load LinoriaLib
 local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
@@ -45,35 +48,29 @@ local Config = {
         VisibleOnly = false,
         IgnoreProtected = true,
     },
-    
     Aimbot = {
         Enabled = false,
         ReactionTime = 100,
         ForgetTime = 0.5,
-        ShootDelay = 0,
         MaxDistance = 100,
     },
-    
     Triggerbot = {
         Enabled = false,
         ReactionTime = 100,
         ShootDelay = 0,
     },
-    
     Ragebot = {
         Enabled = false,
         VoidSpam = false,
         Hide = 0.25,
         Attack = 0.1,
     },
-    
     Weapons = {
         NoSpread = false,
         FullAuto = false,
         AlwaysBackstab = false,
         FireRate = 100,
     },
-    
     Settings = {
         AntiKatana = false,
     }
@@ -81,20 +78,69 @@ local Config = {
 
 -- Variables
 local Camera = workspace.CurrentCamera
-local CameraController = nil
 local SilentAimTarget = nil
 local AimbotTarget = nil
 local Connections = {}
 
--- Get CameraController
-pcall(function()
-    CameraController = localPlayer.PlayerScripts:WaitForChild("Controllers"):WaitForChild("TimerController"):WaitForChild("CameraController")
+-- ━━━━━━━━━━━━━━━━━━━━━
+-- Fixed CameraController
+-- Search in correct place!
+-- ━━━━━━━━━━━━━━━━━━━━━
+
+local CameraController = nil
+
+local function FindCameraController()
+    -- Search multiple possible paths
+    local paths = {
+        -- Path 1
+        function()
+            return localPlayer.PlayerScripts
+                :FindFirstChild("Controllers")
+                and localPlayer.PlayerScripts.Controllers
+                :FindFirstChild("CameraController")
+        end,
+        -- Path 2
+        function()
+            local scripts = localPlayer:FindFirstChild("PlayerScripts")
+            if not scripts then return nil end
+            for _, v in pairs(scripts:GetDescendants()) do
+                if v.Name == "CameraController" then
+                    return v
+                end
+            end
+        end,
+        -- Path 3
+        function()
+            for _, v in pairs(localPlayer.PlayerScripts:GetDescendants()) do
+                if v.Name:find("Camera") then
+                    print("Found camera related: " .. v:GetFullName())
+                end
+            end
+            return nil
+        end,
+    }
+
+    for _, path in pairs(paths) do
+        local ok, result = pcall(path)
+        if ok and result then
+            print("✅ CameraController found: " .. result:GetFullName())
+            return result
+        end
+    end
+
+    print("⚠️ CameraController not found - Aimbot will use Camera.CFrame instead")
+    return nil
+end
+
+-- Find without yielding forever
+task.spawn(function()
+    CameraController = FindCameraController()
 end)
 
 --[[
-    ═══════════════════════════════════════════════════════
-                    UTILITY FUNCTIONS
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
+                UTILITY FUNCTIONS
+    ═══════════════════════════════════════════════
 ]]
 
 local function IsAlive(player)
@@ -105,49 +151,60 @@ end
 
 local function GetClosestPlayer()
     local closest, closestDistance = nil, math.huge
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    
+    local screenCenter = Vector2.new(
+        Camera.ViewportSize.X / 2,
+        Camera.ViewportSize.Y / 2
+    )
+
     for _, player in ipairs(players:GetPlayers()) do
         if player ~= localPlayer and IsAlive(player) then
             local character = player.Character
             local rootPart = character:FindFirstChild("HumanoidRootPart")
-            
+
             if rootPart then
-                -- Check if protected
-                if Config.SilentAim.IgnoreProtected and character:FindFirstChildOfClass("ForceField") then
+                if Config.SilentAim.IgnoreProtected 
+                and character:FindFirstChildOfClass("ForceField") then
                     continue
                 end
-                
-                local screenPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+
+                local screenPos, onScreen = Camera:WorldToViewportPoint(
+                    rootPart.Position
+                )
                 if not onScreen then continue end
-                
+
                 local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
                 local distance = (screenCenter - screenPos2D).Magnitude
-                
-                if distance <= Config.SilentAim.Radius and distance < closestDistance then
+
+                if distance <= Config.SilentAim.Radius 
+                and distance < closestDistance then
                     closest = player
                     closestDistance = distance
                 end
             end
         end
     end
-    
+
     return closest
 end
 
 local function GetClosestPart(character)
     if not character then return nil end
-    
+
     local closest, closestDistance = nil, math.huge
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    
+    local screenCenter = Vector2.new(
+        Camera.ViewportSize.X / 2,
+        Camera.ViewportSize.Y / 2
+    )
+
     for _, part in ipairs(character:GetChildren()) do
         if part:IsA("BasePart") then
-            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(
+                part.Position
+            )
             if onScreen then
                 local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
                 local distance = (screenCenter - screenPos2D).Magnitude
-                
+
                 if distance < closestDistance then
                     closest = part
                     closestDistance = distance
@@ -155,14 +212,14 @@ local function GetClosestPart(character)
             end
         end
     end
-    
+
     return closest
 end
 
 --[[
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
                     SILENT AIM
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
 ]]
 
 local utility = require(replicatedStorage.Modules.Utility)
@@ -170,65 +227,75 @@ local originalRaycast = utility.Raycast
 
 utility.Raycast = function(...)
     local args = {...}
-    
+
     if Config.SilentAim.Enabled and args[4] == 999 then
         local target = GetClosestPlayer()
-        
+
         if target then
             SilentAimTarget = target
-            
-            -- Hit chance
+
             if math.random(100) <= Config.SilentAim.HitChance then
                 local targetPart
-                
+
                 if Config.SilentAim.ClosestPart then
                     targetPart = GetClosestPart(target.Character)
                 else
                     targetPart = target.Character:FindFirstChild("Head")
                 end
-                
+
                 if targetPart then
                     args[3] = targetPart.Position
                 end
             end
+        else
+            SilentAimTarget = nil
         end
     end
-    
+
     return originalRaycast(...)
 end
 
 --[[
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
                     AIMBOT
-    ═══════════════════════════════════════════════════════
+    Fixed: Uses Camera.CFrame instead of
+    CameraController if not found
+    ═══════════════════════════════════════════════
 ]]
 
-local function CalculateAngles(targetPos)
-    local cameraPos = Camera.CFrame.Position
-    local direction = (targetPos - cameraPos).Unit
-    
-    local pitch = math.asin(-direction.Y)
-    local yaw = math.atan2(-direction.X, -direction.Z)
-    
-    return Vector2.new(pitch, yaw)
-end
-
 Connections.Aimbot = runService.RenderStepped:Connect(function()
-    if not Config.Aimbot.Enabled or not CameraController then return end
-    
+    if not Config.Aimbot.Enabled then return end
+
     local target = GetClosestPlayer()
-    
+
     if target then
         AimbotTarget = target
         local character = target.Character
         local targetPart = character:FindFirstChild("Head")
-        
+
         if targetPart then
-            local angles = CalculateAngles(targetPart.Position)
-            
-            pcall(function()
-                CameraController:SetRotation(angles)
-            end)
+            if CameraController then
+                -- Use CameraController if found
+                pcall(function()
+                    local dir = (
+                        targetPart.Position - Camera.CFrame.Position
+                    ).Unit
+                    local pitch = math.asin(-dir.Y)
+                    local yaw = math.atan2(-dir.X, -dir.Z)
+                    CameraController:SetRotation(
+                        Vector2.new(pitch, yaw)
+                    )
+                end)
+            else
+                -- Fallback: Move camera directly
+                Camera.CFrame = Camera.CFrame:Lerp(
+                    CFrame.new(
+                        Camera.CFrame.Position,
+                        targetPart.Position
+                    ),
+                    0.2
+                )
+            end
         end
     else
         AimbotTarget = nil
@@ -236,101 +303,130 @@ Connections.Aimbot = runService.RenderStepped:Connect(function()
 end)
 
 --[[
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
                     TRIGGERBOT
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
 ]]
 
 local lastShootTime = 0
 
 Connections.Triggerbot = runService.Heartbeat:Connect(function()
     if not Config.Triggerbot.Enabled then return end
-    
+
     if AimbotTarget or SilentAimTarget then
         local currentTime = tick()
-        
+
         if currentTime - lastShootTime >= Config.Triggerbot.ShootDelay then
             task.wait(Config.Triggerbot.ReactionTime / 1000)
-            
-            local tool = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Tool")
+
+            local tool = localPlayer.Character 
+                and localPlayer.Character:FindFirstChildOfClass("Tool")
             if tool then
-                tool:Activate()
-                lastShootTime = currentTime
+                pcall(function() tool:Activate() end)
+                lastShootTime = tick()
             end
         end
     end
 end)
 
 --[[
-    ═══════════════════════════════════════════════════════
-                    RAGEBOT (VOID SPAM)
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
+                RAGEBOT - FIXED VOID SPAM
+    No more ReplicateUnreliable spam!
+    ═══════════════════════════════════════════════
 ]]
 
 local voidPosition = -380
+local lastVoidTime = 0
+local isInVoid = false
 
 Connections.Ragebot = runService.Heartbeat:Connect(function()
     if not Config.Ragebot.Enabled then return end
-    
+    if not Config.Ragebot.VoidSpam then return end
+
     local character = localPlayer.Character
     if not character then return end
-    
+
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
-    
-    if Config.Ragebot.VoidSpam then
-        local currentPos = rootPart.Position
-        local targetY = tick() % Config.Ragebot.Hide < 0.1 and voidPosition or currentPos.Y
-        
-        rootPart.CFrame = CFrame.new(currentPos.X, targetY, currentPos.Z)
-        rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+
+    local currentTime = tick()
+    local currentPos = rootPart.Position
+
+    -- Fixed: Proper timing instead of tick() % hide
+    if not isInVoid then
+        if currentTime - lastVoidTime >= Config.Ragebot.Attack then
+            -- Go to void
+            isInVoid = true
+            lastVoidTime = currentTime
+            pcall(function()
+                rootPart.CFrame = CFrame.new(
+                    currentPos.X,
+                    voidPosition,
+                    currentPos.Z
+                )
+                rootPart.AssemblyLinearVelocity = Vector3.zero
+            end)
+        end
+    else
+        if currentTime - lastVoidTime >= Config.Ragebot.Hide then
+            -- Come back
+            isInVoid = false
+            lastVoidTime = currentTime
+            pcall(function()
+                rootPart.AssemblyLinearVelocity = Vector3.zero
+            end)
+        end
     end
 end)
 
 --[[
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
                     WEAPON MODS
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
 ]]
 
 local function ModifyWeapon(tool)
     if not tool or not tool:IsA("Tool") then return end
-    
+
     pcall(function()
         if Config.Weapons.NoSpread then
-            if tool:FindFirstChild("Spread") then
-                tool.Spread.Value = 0
-            end
+            local spread = tool:FindFirstChild("Spread")
+            if spread then spread.Value = 0 end
         end
-        
+
         if Config.Weapons.FullAuto then
             tool:SetAttribute("FireMode", "Auto")
-        end
-        
-        if Config.Weapons.AlwaysBackstab then
-            -- Backstab logic would go here
         end
     end)
 end
 
-localPlayer.Character.ChildAdded:Connect(function(child)
-    if child:IsA("Tool") then
-        ModifyWeapon(child)
-    end
-end)
-
-if localPlayer.Character then
-    for _, child in ipairs(localPlayer.Character:GetChildren()) do
+-- Safe character child added
+pcall(function()
+    localPlayer.Character.ChildAdded:Connect(function(child)
         if child:IsA("Tool") then
             ModifyWeapon(child)
         end
-    end
-end
+    end)
+end)
+
+localPlayer.CharacterAdded:Connect(function(char)
+    -- Reset targets on respawn
+    SilentAimTarget = nil
+    AimbotTarget = nil
+    isInVoid = false
+
+    char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            ModifyWeapon(child)
+        end
+    end)
+end)
 
 --[[
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
                     UI CREATION
-    ═══════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════
 ]]
 
 local Window = Library:CreateWindow({
@@ -341,7 +437,6 @@ local Window = Library:CreateWindow({
     MenuFadeTime = 0.2
 })
 
--- Tabs
 local Tabs = {
     Main = Window:AddTab('Main'),
     World = Window:AddTab('World'),
@@ -349,7 +444,10 @@ local Tabs = {
     Settings = Window:AddTab('Settings')
 }
 
--- Main Tab
+-- ━━━━━━━━━━━━━━━━━━━━━
+-- MAIN TAB
+-- ━━━━━━━━━━━━━━━━━━━━━
+
 local SilentAimGroup = Tabs.Main:AddLeftGroupbox('Silent Aim')
 
 SilentAimGroup:AddToggle('SilentAimEnabled', {
@@ -364,7 +462,7 @@ SilentAimGroup:AddToggle('SilentAimEnabled', {
 SilentAimGroup:AddToggle('SilentAimVisualize', {
     Text = 'Visualize',
     Default = false,
-    Tooltip = 'Show silent aim visualizations',
+    Tooltip = 'Show silent aim FOV circle',
     Callback = function(Value)
         Config.SilentAim.Visualize = Value
     end
@@ -397,7 +495,7 @@ SilentAimGroup:AddSlider('SilentAimHitChance', {
 SilentAimGroup:AddToggle('SilentAimClosestPart', {
     Text = 'Closest Part',
     Default = true,
-    Tooltip = 'Target closest part',
+    Tooltip = 'Target closest body part',
     Callback = function(Value)
         Config.SilentAim.ClosestPart = Value
     end
@@ -406,11 +504,33 @@ SilentAimGroup:AddToggle('SilentAimClosestPart', {
 SilentAimGroup:AddToggle('SilentAimIgnoreProtected', {
     Text = 'Ignore Protected',
     Default = true,
-    Tooltip = 'Ignore players with ForceField',
+    Tooltip = 'Ignore ForceField players',
     Callback = function(Value)
         Config.SilentAim.IgnoreProtected = Value
     end
 })
+
+-- FOV Circle Visualization
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 1.5
+fovCircle.Filled = false
+fovCircle.NumSides = 64
+fovCircle.Visible = false
+fovCircle.Color = Color3.fromRGB(0, 200, 255)
+
+runService.RenderStepped:Connect(function()
+    if Config.SilentAim.Visualize then
+        local center = Camera.ViewportSize / 2
+        fovCircle.Position = Vector2.new(center.X, center.Y)
+        fovCircle.Radius = Config.SilentAim.Radius
+        fovCircle.Visible = true
+        fovCircle.Color = SilentAimTarget
+            and Color3.fromRGB(255, 50, 50)
+            or Color3.fromRGB(0, 200, 255)
+    else
+        fovCircle.Visible = false
+    end
+end)
 
 local AimbotGroup = Tabs.Main:AddRightGroupbox('Aimbot')
 
@@ -494,7 +614,10 @@ TriggerbotGroup:AddSlider('TriggerbotShootDelay', {
     end
 })
 
--- World Tab
+-- ━━━━━━━━━━━━━━━━━━━━━
+-- WORLD TAB
+-- ━━━━━━━━━━━━━━━━━━━━━
+
 local RagebotGroup = Tabs.World:AddLeftGroupbox('Ragebot')
 
 RagebotGroup:AddToggle('RagebotEnabled', {
@@ -509,9 +632,10 @@ RagebotGroup:AddToggle('RagebotEnabled', {
 RagebotGroup:AddToggle('RagebotVoidSpam', {
     Text = 'Void Spam',
     Default = false,
-    Tooltip = 'Enable void spam',
+    Tooltip = 'Spam void to avoid hits',
     Callback = function(Value)
         Config.Ragebot.VoidSpam = Value
+        isInVoid = false
     end
 })
 
@@ -553,7 +677,7 @@ WeaponsGroup:AddToggle('WeaponsNoSpread', {
 WeaponsGroup:AddToggle('WeaponsFullAuto', {
     Text = 'Full Auto',
     Default = false,
-    Tooltip = 'Make all weapons automatic',
+    Tooltip = 'Make weapons automatic',
     Callback = function(Value)
         Config.Weapons.FullAuto = Value
     end
@@ -580,12 +704,17 @@ WeaponsGroup:AddSlider('WeaponsFireRate', {
     end
 })
 
--- Visuals Tab
-local VisualsGroup = Tabs.Visuals:AddLeftGroupbox('Visuals')
+-- ━━━━━━━━━━━━━━━━━━━━━
+-- VISUALS TAB
+-- ━━━━━━━━━━━━━━━━━━━━━
 
+local VisualsGroup = Tabs.Visuals:AddLeftGroupbox('Visuals')
 VisualsGroup:AddLabel('ESP features coming soon')
 
--- Settings Tab
+-- ━━━━━━━━━━━━━━━━━━━━━
+-- SETTINGS TAB
+-- ━━━━━━━━━━━━━━━━━━━━━
+
 local SettingsGroup = Tabs.Settings:AddLeftGroupbox('Settings')
 
 SettingsGroup:AddToggle('AntiKatana', {
@@ -603,55 +732,49 @@ SettingsGroup:AddButton({
         for _, connection in pairs(Connections) do
             connection:Disconnect()
         end
-        
+        fovCircle.Visible = false
+        fovCircle:Remove()
         utility.Raycast = originalRaycast
-        
         Library:Unload()
     end,
     DoubleClick = true,
     Tooltip = 'Double click to unload'
 })
 
--- UI Settings
-Library:SetWatermarkVisibility(true)
-Library:SetWatermark('Rivals | Unnamed Enhancements | ' .. os.date('%H:%M:%S'))
+-- ━━━━━━━━━━━━━━━━━━━━━
+-- Watermark
+-- ━━━━━━━━━━━━━━━━━━━━━
 
--- Update watermark
+Library:SetWatermarkVisibility(true)
+Library:SetWatermark(
+    'Rivals | Unnamed Enhancements | ' .. os.date('%H:%M:%S')
+)
+
 task.spawn(function()
-    while true do
+    while Library do
         task.wait(1)
-        Library:SetWatermark('Rivals | Unnamed Enhancements | ' .. os.date('%H:%M:%S'))
+        pcall(function()
+            Library:SetWatermark(
+                'Rivals | Unnamed Enhancements | ' .. os.date('%H:%M:%S')
+            )
+        end)
     end
 end)
 
--- Theme Manager
+-- Theme and Save Manager
 ThemeManager:SetLibrary(Library)
 ThemeManager:SetFolder('RivalsUE')
 ThemeManager:ApplyToTab(Tabs.Settings)
 
--- Save Manager
 SaveManager:SetLibrary(Library)
 SaveManager:SetFolder('RivalsUE/configs')
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
--- Notifications
-Library:Notify('Rivals UE', 'Script loaded successfully!', 5)
+Library:Notify(
+    'Rivals UE',
+    'Script loaded! Bugs fixed!',
+    5
+)
 
-print([[
-╔══════════════════════════════════════════════════════════╗
-║          RIVALS - UNNAMED ENHANCEMENTS STYLE             ║
-║          Anti-Cheat Bypass Active                        ║
-║          UI: LinoriaLib                                   ║
-╚══════════════════════════════════════════════════════════╝
-
-Features:
-✓ Silent Aim (with hit chance)
-✓ Aimbot (CameraController)
-✓ Triggerbot
-✓ Ragebot (Void Spam)
-✓ Weapon Mods
-✓ Anti-Cheat Bypass
-
-Press RightShift to toggle UI
-]])
+print("✅ Rivals UE Script Loaded!")
