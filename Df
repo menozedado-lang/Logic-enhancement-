@@ -1,43 +1,41 @@
---[[
-    Rivals Script - UE Style
-    Fixed Version
-]]
 
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
+-- === UI Changer + Rivals Features ===
 
+local repo = 'https://raw.githubusercontent.com/mstudio45/LinoriaLib/main/'
+
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+
+Library.ShowToggleFrameInKeybinds = true
+
+-- Services
 local players = game:GetService("Players")
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
-local workspace = game:GetService("Workspace")
 local localPlayer = players.LocalPlayer
 
--- ━━━━━━━━━━━━━━━━━━━━━
 -- Fixed Analytics Bypass
--- No more infinite loop!
--- ━━━━━━━━━━━━━━━━━━━━━
 pcall(function()
     for i, v in getgc(true) do
         if typeof(v) == "function" then
             local ok, src = pcall(debug.info, v, "s")
             if ok and src and src:find("AnalyticsPipelineController") then
                 pcall(hookfunction, v, function()
-                    return -- Just return nothing
+                    return
                 end)
             end
         end
     end
 end)
 
--- Load LinoriaLib
-local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
-local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
-local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
-local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+--[[
+    ═══════════════════════════════
+            CONFIG
+    ═══════════════════════════════
+]]
 
--- Configuration
 local Config = {
     SilentAim = {
         Enabled = false,
@@ -45,7 +43,6 @@ local Config = {
         Radius = 100,
         HitChance = 100,
         ClosestPart = true,
-        VisibleOnly = false,
         IgnoreProtected = true,
     },
     Aimbot = {
@@ -71,9 +68,6 @@ local Config = {
         AlwaysBackstab = false,
         FireRate = 100,
     },
-    Settings = {
-        AntiKatana = false,
-    }
 }
 
 -- Variables
@@ -81,106 +75,69 @@ local Camera = workspace.CurrentCamera
 local SilentAimTarget = nil
 local AimbotTarget = nil
 local Connections = {}
-
--- ━━━━━━━━━━━━━━━━━━━━━
--- Fixed CameraController
--- Search in correct place!
--- ━━━━━━━━━━━━━━━━━━━━━
-
+local isInVoid = false
+local lastVoidTime = 0
 local CameraController = nil
 
-local function FindCameraController()
-    -- Search multiple possible paths
-    local paths = {
-        -- Path 1
-        function()
-            return localPlayer.PlayerScripts
-                :FindFirstChild("Controllers")
-                and localPlayer.PlayerScripts.Controllers
-                :FindFirstChild("CameraController")
-        end,
-        -- Path 2
-        function()
-            local scripts = localPlayer:FindFirstChild("PlayerScripts")
-            if not scripts then return nil end
-            for _, v in pairs(scripts:GetDescendants()) do
-                if v.Name == "CameraController" then
-                    return v
-                end
-            end
-        end,
-        -- Path 3
-        function()
-            for _, v in pairs(localPlayer.PlayerScripts:GetDescendants()) do
-                if v.Name:find("Camera") then
-                    print("Found camera related: " .. v:GetFullName())
-                end
-            end
-            return nil
-        end,
-    }
-
-    for _, path in pairs(paths) do
-        local ok, result = pcall(path)
-        if ok and result then
-            print("✅ CameraController found: " .. result:GetFullName())
-            return result
-        end
-    end
-
-    print("⚠️ CameraController not found - Aimbot will use Camera.CFrame instead")
-    return nil
-end
-
--- Find without yielding forever
+-- Find CameraController
 task.spawn(function()
-    CameraController = FindCameraController()
+    pcall(function()
+        for _, v in pairs(
+            localPlayer.PlayerScripts:GetDescendants()
+        ) do
+            if v.Name == "CameraController" then
+                CameraController = v
+                break
+            end
+        end
+    end)
 end)
 
 --[[
-    ═══════════════════════════════════════════════
-                UTILITY FUNCTIONS
-    ═══════════════════════════════════════════════
+    ═══════════════════════════════
+            UTILITY
+    ═══════════════════════════════
 ]]
 
 local function IsAlive(player)
     if not player or not player.Character then return false end
-    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-    return humanoid and humanoid.Health > 0
+    local hum = player.Character:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
 end
 
 local function GetClosestPlayer()
-    local closest, closestDistance = nil, math.huge
+    local closest, closestDist = nil, math.huge
     local screenCenter = Vector2.new(
         Camera.ViewportSize.X / 2,
         Camera.ViewportSize.Y / 2
     )
 
     for _, player in ipairs(players:GetPlayers()) do
-        if player ~= localPlayer and IsAlive(player) then
-            local character = player.Character
-            local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if player == localPlayer then continue end
+        if not IsAlive(player) then continue end
 
-            if rootPart then
-                if Config.SilentAim.IgnoreProtected 
-                and character:FindFirstChildOfClass("ForceField") then
-                    continue
-                end
+        local char = player.Character
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then continue end
 
-                local screenPos, onScreen = Camera:WorldToViewportPoint(
-                    rootPart.Position
-                )
-                if not onScreen then continue end
+        if Config.SilentAim.IgnoreProtected
+        and char:FindFirstChildOfClass("ForceField") then
+            continue
+        end
 
-                local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
-                local distance = (screenCenter - screenPos2D).Magnitude
+        local sp, onScreen = Camera:WorldToViewportPoint(
+            root.Position
+        )
+        if not onScreen then continue end
 
-                if distance <= Config.SilentAim.Radius 
-                and distance < closestDistance then
-                    closest = player
-                    closestDistance = distance
-                end
-            end
+        local dist = (
+            Vector2.new(sp.X, sp.Y) - screenCenter
+        ).Magnitude
+
+        if dist <= Config.SilentAim.Radius
+        and dist < closestDist then
+            closest = player
+            closestDist = dist
         end
     end
 
@@ -189,27 +146,24 @@ end
 
 local function GetClosestPart(character)
     if not character then return nil end
-
-    local closest, closestDistance = nil, math.huge
+    local closest, closestDist = nil, math.huge
     local screenCenter = Vector2.new(
         Camera.ViewportSize.X / 2,
         Camera.ViewportSize.Y / 2
     )
 
     for _, part in ipairs(character:GetChildren()) do
-        if part:IsA("BasePart") then
-            local screenPos, onScreen = Camera:WorldToViewportPoint(
-                part.Position
-            )
-            if onScreen then
-                local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
-                local distance = (screenCenter - screenPos2D).Magnitude
-
-                if distance < closestDistance then
-                    closest = part
-                    closestDistance = distance
-                end
-            end
+        if not part:IsA("BasePart") then continue end
+        local sp, onScreen = Camera:WorldToViewportPoint(
+            part.Position
+        )
+        if not onScreen then continue end
+        local dist = (
+            Vector2.new(sp.X, sp.Y) - screenCenter
+        ).Magnitude
+        if dist < closestDist then
+            closest = part
+            closestDist = dist
         end
     end
 
@@ -217,9 +171,9 @@ local function GetClosestPart(character)
 end
 
 --[[
-    ═══════════════════════════════════════════════
-                    SILENT AIM
-    ═══════════════════════════════════════════════
+    ═══════════════════════════════
+            SILENT AIM
+    ═══════════════════════════════
 ]]
 
 local utility = require(replicatedStorage.Modules.Utility)
@@ -235,13 +189,9 @@ utility.Raycast = function(...)
             SilentAimTarget = target
 
             if math.random(100) <= Config.SilentAim.HitChance then
-                local targetPart
-
-                if Config.SilentAim.ClosestPart then
-                    targetPart = GetClosestPart(target.Character)
-                else
-                    targetPart = target.Character:FindFirstChild("Head")
-                end
+                local targetPart = Config.SilentAim.ClosestPart
+                    and GetClosestPart(target.Character)
+                    or target.Character:FindFirstChild("Head")
 
                 if targetPart then
                     args[3] = targetPart.Position
@@ -256,11 +206,9 @@ utility.Raycast = function(...)
 end
 
 --[[
-    ═══════════════════════════════════════════════
-                    AIMBOT
-    Fixed: Uses Camera.CFrame instead of
-    CameraController if not found
-    ═══════════════════════════════════════════════
+    ═══════════════════════════════
+            AIMBOT
+    ═══════════════════════════════
 ]]
 
 Connections.Aimbot = runService.RenderStepped:Connect(function()
@@ -270,28 +218,23 @@ Connections.Aimbot = runService.RenderStepped:Connect(function()
 
     if target then
         AimbotTarget = target
-        local character = target.Character
-        local targetPart = character:FindFirstChild("Head")
-
-        if targetPart then
+        local part = target.Character:FindFirstChild("Head")
+        if part then
             if CameraController then
-                -- Use CameraController if found
                 pcall(function()
                     local dir = (
-                        targetPart.Position - Camera.CFrame.Position
+                        part.Position - Camera.CFrame.Position
                     ).Unit
-                    local pitch = math.asin(-dir.Y)
-                    local yaw = math.atan2(-dir.X, -dir.Z)
-                    CameraController:SetRotation(
-                        Vector2.new(pitch, yaw)
-                    )
+                    CameraController:SetRotation(Vector2.new(
+                        math.asin(-dir.Y),
+                        math.atan2(-dir.X, -dir.Z)
+                    ))
                 end)
             else
-                -- Fallback: Move camera directly
                 Camera.CFrame = Camera.CFrame:Lerp(
                     CFrame.new(
                         Camera.CFrame.Position,
-                        targetPart.Position
+                        part.Position
                     ),
                     0.2
                 )
@@ -303,214 +246,290 @@ Connections.Aimbot = runService.RenderStepped:Connect(function()
 end)
 
 --[[
-    ═══════════════════════════════════════════════
-                    TRIGGERBOT
-    ═══════════════════════════════════════════════
+    ═══════════════════════════════
+            TRIGGERBOT
+    ═══════════════════════════════
 ]]
 
 local lastShootTime = 0
 
 Connections.Triggerbot = runService.Heartbeat:Connect(function()
     if not Config.Triggerbot.Enabled then return end
+    if not (AimbotTarget or SilentAimTarget) then return end
 
-    if AimbotTarget or SilentAimTarget then
-        local currentTime = tick()
+    local now = tick()
+    if now - lastShootTime < Config.Triggerbot.ShootDelay then
+        return
+    end
 
-        if currentTime - lastShootTime >= Config.Triggerbot.ShootDelay then
-            task.wait(Config.Triggerbot.ReactionTime / 1000)
-
-            local tool = localPlayer.Character 
-                and localPlayer.Character:FindFirstChildOfClass("Tool")
-            if tool then
-                pcall(function() tool:Activate() end)
-                lastShootTime = tick()
-            end
-        end
+    task.wait(Config.Triggerbot.ReactionTime / 1000)
+    local tool = localPlayer.Character
+        and localPlayer.Character:FindFirstChildOfClass("Tool")
+    if tool then
+        pcall(function() tool:Activate() end)
+        lastShootTime = tick()
     end
 end)
 
 --[[
-    ═══════════════════════════════════════════════
-                RAGEBOT - FIXED VOID SPAM
-    No more ReplicateUnreliable spam!
-    ═══════════════════════════════════════════════
+    ═══════════════════════════════
+            RAGEBOT
+    ═══════════════════════════════
 ]]
-
-local voidPosition = -380
-local lastVoidTime = 0
-local isInVoid = false
 
 Connections.Ragebot = runService.Heartbeat:Connect(function()
     if not Config.Ragebot.Enabled then return end
     if not Config.Ragebot.VoidSpam then return end
 
-    local character = localPlayer.Character
-    if not character then return end
+    local char = localPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
 
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
+    local now = tick()
+    local pos = root.Position
 
-    local currentTime = tick()
-    local currentPos = rootPart.Position
-
-    -- Fixed: Proper timing instead of tick() % hide
     if not isInVoid then
-        if currentTime - lastVoidTime >= Config.Ragebot.Attack then
-            -- Go to void
+        if now - lastVoidTime >= Config.Ragebot.Attack then
             isInVoid = true
-            lastVoidTime = currentTime
+            lastVoidTime = now
             pcall(function()
-                rootPart.CFrame = CFrame.new(
-                    currentPos.X,
-                    voidPosition,
-                    currentPos.Z
-                )
-                rootPart.AssemblyLinearVelocity = Vector3.zero
+                root.CFrame = CFrame.new(pos.X, -380, pos.Z)
+                root.AssemblyLinearVelocity = Vector3.zero
             end)
         end
     else
-        if currentTime - lastVoidTime >= Config.Ragebot.Hide then
-            -- Come back
+        if now - lastVoidTime >= Config.Ragebot.Hide then
             isInVoid = false
-            lastVoidTime = currentTime
+            lastVoidTime = now
             pcall(function()
-                rootPart.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyLinearVelocity = Vector3.zero
             end)
         end
     end
 end)
 
 --[[
-    ═══════════════════════════════════════════════
-                    WEAPON MODS
-    ═══════════════════════════════════════════════
+    ═══════════════════════════════
+            WEAPON MODS
+    ═══════════════════════════════
 ]]
 
 local function ModifyWeapon(tool)
     if not tool or not tool:IsA("Tool") then return end
-
     pcall(function()
         if Config.Weapons.NoSpread then
             local spread = tool:FindFirstChild("Spread")
             if spread then spread.Value = 0 end
         end
-
         if Config.Weapons.FullAuto then
             tool:SetAttribute("FireMode", "Auto")
         end
     end)
 end
 
--- Safe character child added
-pcall(function()
-    localPlayer.Character.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then
-            ModifyWeapon(child)
-        end
-    end)
-end)
-
 localPlayer.CharacterAdded:Connect(function(char)
-    -- Reset targets on respawn
     SilentAimTarget = nil
     AimbotTarget = nil
     isInVoid = false
-
     char.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then
-            ModifyWeapon(child)
-        end
+        if child:IsA("Tool") then ModifyWeapon(child) end
     end)
 end)
 
+pcall(function()
+    if localPlayer.Character then
+        for _, v in pairs(localPlayer.Character:GetChildren()) do
+            if v:IsA("Tool") then ModifyWeapon(v) end
+        end
+    end
+end)
+
 --[[
-    ═══════════════════════════════════════════════
-                    UI CREATION
-    ═══════════════════════════════════════════════
+    ═══════════════════════════════
+        CONSOLE TO SCREEN
+    ═══════════════════════════════
 ]]
 
-local Window = Library:CreateWindow({
-    Title = 'Rivals | Unnamed Enhancements',
-    Center = true,
-    AutoShow = true,
-    TabPadding = 8,
-    MenuFadeTime = 0.2
-})
+local consoleEnabled = true
+local consoleTextColor = Color3.fromRGB(255, 255, 100)
+local consoleDuration = 4
+local consoleLabels = {}
 
-local Tabs = {
-    Main = Window:AddTab('Main'),
-    World = Window:AddTab('World'),
-    Visuals = Window:AddTab('Visuals'),
-    Settings = Window:AddTab('Settings')
-}
+local function showConsoleMessage(text)
+    if not consoleEnabled then return end
 
--- ━━━━━━━━━━━━━━━━━━━━━
--- MAIN TAB
--- ━━━━━━━━━━━━━━━━━━━━━
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Text = "CONSOLE: " .. tostring(text)
+    label.Font = Enum.Font.Code
+    label.TextColor3 = consoleTextColor
+    label.TextSize = 18
+    label.TextStrokeTransparency = 0.7
+    label.TextStrokeColor3 = Color3.new(0, 0, 0)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Size = UDim2.new(0.9, 0, 0, 30)
+    label.Position = UDim2.new(
+        0.05, 0,
+        0.1 + (#consoleLabels * 0.06), 0
+    )
+    label.Parent = localPlayer:WaitForChild("PlayerGui")
 
-local SilentAimGroup = Tabs.Main:AddLeftGroupbox('Silent Aim')
+    table.insert(consoleLabels, label)
+    label.TextTransparency = 1
 
-SilentAimGroup:AddToggle('SilentAimEnabled', {
-    Text = 'Enabled',
-    Default = false,
-    Tooltip = 'Enable silent aim',
-    Callback = function(Value)
-        Config.SilentAim.Enabled = Value
+    game:GetService("TweenService"):Create(
+        label, TweenInfo.new(0.3),
+        {TextTransparency = 0}
+    ):Play()
+
+    task.delay(consoleDuration, function()
+        if label and label.Parent then
+            game:GetService("TweenService"):Create(
+                label, TweenInfo.new(0.8),
+                {TextTransparency = 1}
+            ):Play()
+            task.wait(0.8)
+            label:Destroy()
+        end
+        local idx = table.find(consoleLabels, label)
+        if idx then table.remove(consoleLabels, idx) end
+    end)
+end
+
+local oldPrint = print
+local oldWarn = warn
+
+_G.print = function(...)
+    local msg = table.concat({...}, " ")
+    oldPrint(...)
+    showConsoleMessage(msg)
+end
+
+_G.warn = function(...)
+    local msg = table.concat({...}, " ")
+    oldWarn(...)
+    showConsoleMessage("[WARN] " .. msg)
+end
+
+--[[
+    ═══════════════════════════════
+        COLOR CHANGER
+    ═══════════════════════════════
+]]
+
+local currentColor = Color3.fromRGB(100, 0, 200)
+local currentStroke = Color3.fromRGB(170, 0, 255)
+
+local function ApplyWeaponColor()
+    pcall(function()
+        local handler = localPlayer
+            :WaitForChild("PlayerScripts", 2)
+            :WaitForChild("Modules", 2)
+            :WaitForChild("WeaponStatusHandler", 2)
+        if not handler then return end
+
+        local WeaponStatusHandler = require(handler)
+        local oldFunc = WeaponStatusHandler
+            .ApplyItemStatusToBackground
+
+        WeaponStatusHandler.ApplyItemStatusToBackground = function(
+            self, background, stroke, status
+        )
+            background.BackgroundColor3 = currentColor
+            if stroke then
+                stroke.Color = currentStroke
+                stroke.Thickness = 2
+            end
+            local parent = background.Parent
+            if parent and parent:FindFirstChild("Icon") then
+                parent.Icon.Picture.ImageTransparency = 0.1
+            end
+            return oldFunc(self, background, stroke, "Banned")
+        end
+    end)
+    Library:Notify('✅ Weapon slot color applied', 2.5)
+end
+
+--[[
+    ═══════════════════════════════
+        HIT NUMBERS
+    ═══════════════════════════════
+]]
+
+local hitEnabled = true
+local hitColor = Color3.fromRGB(255, 20, 147)
+local hitStayTime = 5
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HitNumbersUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+local function showHit(amount)
+    if not hitEnabled then return end
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.AutomaticSize = Enum.AutomaticSize.XY
+    label.Text = tostring(math.floor(amount + 0.5))
+    label.Font = Enum.Font.Jura
+    label.TextColor3 = hitColor
+    label.TextSize = 50
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.new(0, 0, 0)
+    label.TextTransparency = 1
+    label.Position = UDim2.new(
+        0.5, math.random(-180, 180),
+        0.45, math.random(-120, 120)
+    )
+    label.AnchorPoint = Vector2.new(0.5, 0.5)
+    label.Parent = screenGui
+
+    game:GetService("TweenService"):Create(
+        label, TweenInfo.new(0.3),
+        {TextTransparency = 0}
+    ):Play()
+
+    task.delay(hitStayTime, function()
+        game:GetService("TweenService"):Create(
+            label, TweenInfo.new(1),
+            {TextTransparency = 1}
+        ):Play()
+        task.wait(1)
+        label:Destroy()
+    end)
+end
+
+local function setupHumanoid(humanoid)
+    local lastHealth = humanoid.Health
+    humanoid.HealthChanged:Connect(function(newHealth)
+        local dmg = lastHealth - newHealth
+        if dmg > 0.1 then showHit(dmg) end
+        lastHealth = newHealth
+    end)
+end
+
+players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function(char)
+        local hum = char:WaitForChild("Humanoid")
+        if hum then setupHumanoid(hum) end
+    end)
+end)
+
+for _, plr in ipairs(players:GetPlayers()) do
+    if plr.Character then
+        local hum = plr.Character:FindFirstChild("Humanoid")
+        if hum then setupHumanoid(hum) end
     end
-})
+end
 
-SilentAimGroup:AddToggle('SilentAimVisualize', {
-    Text = 'Visualize',
-    Default = false,
-    Tooltip = 'Show silent aim FOV circle',
-    Callback = function(Value)
-        Config.SilentAim.Visualize = Value
-    end
-})
+--[[
+    ═══════════════════════════════
+            FOV CIRCLE
+    ═══════════════════════════════
+]]
 
-SilentAimGroup:AddSlider('SilentAimRadius', {
-    Text = 'Radius',
-    Default = 100,
-    Min = 10,
-    Max = 600,
-    Rounding = 0,
-    Compact = false,
-    Callback = function(Value)
-        Config.SilentAim.Radius = Value
-    end
-})
-
-SilentAimGroup:AddSlider('SilentAimHitChance', {
-    Text = 'Hit Chance %',
-    Default = 100,
-    Min = 0,
-    Max = 100,
-    Rounding = 0,
-    Compact = false,
-    Callback = function(Value)
-        Config.SilentAim.HitChance = Value
-    end
-})
-
-SilentAimGroup:AddToggle('SilentAimClosestPart', {
-    Text = 'Closest Part',
-    Default = true,
-    Tooltip = 'Target closest body part',
-    Callback = function(Value)
-        Config.SilentAim.ClosestPart = Value
-    end
-})
-
-SilentAimGroup:AddToggle('SilentAimIgnoreProtected', {
-    Text = 'Ignore Protected',
-    Default = true,
-    Tooltip = 'Ignore ForceField players',
-    Callback = function(Value)
-        Config.SilentAim.IgnoreProtected = Value
-    end
-})
-
--- FOV Circle Visualization
 local fovCircle = Drawing.new("Circle")
 fovCircle.Thickness = 1.5
 fovCircle.Filled = false
@@ -532,205 +551,575 @@ runService.RenderStepped:Connect(function()
     end
 end)
 
-local AimbotGroup = Tabs.Main:AddRightGroupbox('Aimbot')
+--[[
+    ═══════════════════════════════
+            WINDOW
+    ═══════════════════════════════
+]]
 
-AimbotGroup:AddToggle('AimbotEnabled', {
+local Window = Library:CreateWindow({
+    Title = 'UI Changer + Rivals Features',
+    Center = true,
+    AutoShow = false,
+    Resizable = true,
+    ShowCustomCursor = false,
+    UnlockMouseWhileOpen = true,
+    NotifySide = "Left",
+    TabPadding = 8,
+    MenuFadeTime = 0.2,
+    Size = UDim2.fromOffset(380, 480)
+})
+
+local Tabs = {
+    Combat = Window:AddTab('⚔️ Combat'),
+    Ragebot = Window:AddTab('💀 Ragebot'),
+    Misc = Window:AddTab('🎨 Misc'),
+    World = Window:AddTab('🌍 World'),
+    Settings = Window:AddTab('⚙️ Settings'),
+}
+
+--[[
+    ═══════════════════════════════
+        ⚔️ COMBAT TAB
+    ═══════════════════════════════
+]]
+
+local SAGroup = Tabs.Combat:AddLeftGroupbox('🎯 Silent Aim')
+
+SAGroup:AddToggle('SilentAimEnabled', {
     Text = 'Enabled',
     Default = false,
-    Tooltip = 'Enable aimbot',
-    Callback = function(Value)
-        Config.Aimbot.Enabled = Value
+    Callback = function(v)
+        Config.SilentAim.Enabled = v
     end
 })
 
-AimbotGroup:AddSlider('AimbotReactionTime', {
+SAGroup:AddToggle('SilentAimVisualize', {
+    Text = 'Visualize FOV',
+    Default = false,
+    Callback = function(v)
+        Config.SilentAim.Visualize = v
+    end
+})
+
+SAGroup:AddToggle('SilentAimClosestPart', {
+    Text = 'Closest Part',
+    Default = true,
+    Callback = function(v)
+        Config.SilentAim.ClosestPart = v
+    end
+})
+
+SAGroup:AddToggle('SilentAimIgnoreProtected', {
+    Text = 'Ignore Protected',
+    Default = true,
+    Callback = function(v)
+        Config.SilentAim.IgnoreProtected = v
+    end
+})
+
+SAGroup:AddSlider('SilentAimRadius', {
+    Text = 'Radius',
+    Default = 100,
+    Min = 10,
+    Max = 600,
+    Rounding = 0,
+    Callback = function(v)
+        Config.SilentAim.Radius = v
+    end
+})
+
+SAGroup:AddSlider('SilentAimHitChance', {
+    Text = 'Hit Chance %',
+    Default = 100,
+    Min = 0,
+    Max = 100,
+    Rounding = 0,
+    Callback = function(v)
+        Config.SilentAim.HitChance = v
+    end
+})
+
+local ABGroup = Tabs.Combat:AddRightGroupbox('🖱️ Aimbot')
+
+ABGroup:AddToggle('AimbotEnabled', {
+    Text = 'Enabled',
+    Default = false,
+    Callback = function(v)
+        Config.Aimbot.Enabled = v
+    end
+})
+
+ABGroup:AddSlider('AimbotReactionTime', {
     Text = 'Reaction Time (ms)',
     Default = 100,
     Min = 0,
     Max = 500,
     Rounding = 0,
-    Compact = false,
-    Callback = function(Value)
-        Config.Aimbot.ReactionTime = Value
+    Callback = function(v)
+        Config.Aimbot.ReactionTime = v
     end
 })
 
-AimbotGroup:AddSlider('AimbotForgetTime', {
-    Text = 'Forget Time (s)',
-    Default = 0.5,
-    Min = 0,
-    Max = 5,
-    Rounding = 1,
-    Compact = false,
-    Callback = function(Value)
-        Config.Aimbot.ForgetTime = Value
-    end
-})
-
-AimbotGroup:AddSlider('AimbotMaxDistance', {
+ABGroup:AddSlider('AimbotMaxDistance', {
     Text = 'Max Distance',
     Default = 100,
     Min = 10,
     Max = 500,
     Rounding = 0,
-    Compact = false,
-    Callback = function(Value)
-        Config.Aimbot.MaxDistance = Value
+    Callback = function(v)
+        Config.Aimbot.MaxDistance = v
     end
 })
 
-local TriggerbotGroup = Tabs.Main:AddLeftGroupbox('Triggerbot')
+local TBGroup = Tabs.Combat:AddLeftGroupbox('⚡ Triggerbot')
 
-TriggerbotGroup:AddToggle('TriggerbotEnabled', {
+TBGroup:AddToggle('TriggerbotEnabled', {
     Text = 'Enabled',
     Default = false,
-    Tooltip = 'Enable triggerbot',
-    Callback = function(Value)
-        Config.Triggerbot.Enabled = Value
+    Callback = function(v)
+        Config.Triggerbot.Enabled = v
     end
 })
 
-TriggerbotGroup:AddSlider('TriggerbotReactionTime', {
+TBGroup:AddSlider('TriggerbotReactionTime', {
     Text = 'Reaction Time (ms)',
     Default = 100,
     Min = 0,
     Max = 500,
     Rounding = 0,
-    Compact = false,
-    Callback = function(Value)
-        Config.Triggerbot.ReactionTime = Value
+    Callback = function(v)
+        Config.Triggerbot.ReactionTime = v
     end
 })
 
-TriggerbotGroup:AddSlider('TriggerbotShootDelay', {
+TBGroup:AddSlider('TriggerbotShootDelay', {
     Text = 'Shoot Delay (ms)',
     Default = 0,
     Min = 0,
     Max = 1000,
     Rounding = 0,
-    Compact = false,
-    Callback = function(Value)
-        Config.Triggerbot.ShootDelay = Value / 1000
+    Callback = function(v)
+        Config.Triggerbot.ShootDelay = v / 1000
     end
 })
 
--- ━━━━━━━━━━━━━━━━━━━━━
--- WORLD TAB
--- ━━━━━━━━━━━━━━━━━━━━━
+local WepGroup = Tabs.Combat:AddRightGroupbox('🔫 Weapons')
 
-local RagebotGroup = Tabs.World:AddLeftGroupbox('Ragebot')
-
-RagebotGroup:AddToggle('RagebotEnabled', {
-    Text = 'Enabled',
-    Default = false,
-    Tooltip = 'Enable ragebot',
-    Callback = function(Value)
-        Config.Ragebot.Enabled = Value
-    end
-})
-
-RagebotGroup:AddToggle('RagebotVoidSpam', {
-    Text = 'Void Spam',
-    Default = false,
-    Tooltip = 'Spam void to avoid hits',
-    Callback = function(Value)
-        Config.Ragebot.VoidSpam = Value
-        isInVoid = false
-    end
-})
-
-RagebotGroup:AddSlider('RagebotHide', {
-    Text = 'Hide Interval',
-    Default = 0.25,
-    Min = 0.1,
-    Max = 1,
-    Rounding = 2,
-    Compact = false,
-    Callback = function(Value)
-        Config.Ragebot.Hide = Value
-    end
-})
-
-RagebotGroup:AddSlider('RagebotAttack', {
-    Text = 'Attack Interval',
-    Default = 0.1,
-    Min = 0.05,
-    Max = 1,
-    Rounding = 2,
-    Compact = false,
-    Callback = function(Value)
-        Config.Ragebot.Attack = Value
-    end
-})
-
-local WeaponsGroup = Tabs.World:AddRightGroupbox('Weapons')
-
-WeaponsGroup:AddToggle('WeaponsNoSpread', {
+WepGroup:AddToggle('WeaponsNoSpread', {
     Text = 'No Spread',
     Default = false,
-    Tooltip = 'Remove weapon spread',
-    Callback = function(Value)
-        Config.Weapons.NoSpread = Value
+    Callback = function(v)
+        Config.Weapons.NoSpread = v
     end
 })
 
-WeaponsGroup:AddToggle('WeaponsFullAuto', {
+WepGroup:AddToggle('WeaponsFullAuto', {
     Text = 'Full Auto',
     Default = false,
-    Tooltip = 'Make weapons automatic',
-    Callback = function(Value)
-        Config.Weapons.FullAuto = Value
+    Callback = function(v)
+        Config.Weapons.FullAuto = v
     end
 })
 
-WeaponsGroup:AddToggle('WeaponsAlwaysBackstab', {
+WepGroup:AddToggle('WeaponsAlwaysBackstab', {
     Text = 'Always Backstab',
     Default = false,
-    Tooltip = 'Always register backstabs',
-    Callback = function(Value)
-        Config.Weapons.AlwaysBackstab = Value
+    Callback = function(v)
+        Config.Weapons.AlwaysBackstab = v
     end
 })
 
-WeaponsGroup:AddSlider('WeaponsFireRate', {
+WepGroup:AddSlider('WeaponsFireRate', {
     Text = 'Fire Rate %',
     Default = 100,
     Min = 10,
     Max = 500,
     Rounding = 0,
-    Compact = false,
-    Callback = function(Value)
-        Config.Weapons.FireRate = Value
+    Callback = function(v)
+        Config.Weapons.FireRate = v
     end
 })
 
--- ━━━━━━━━━━━━━━━━━━━━━
--- VISUALS TAB
--- ━━━━━━━━━━━━━━━━━━━━━
+--[[
+    ═══════════════════════════════
+        💀 RAGEBOT TAB
+    ═══════════════════════════════
+]]
 
-local VisualsGroup = Tabs.Visuals:AddLeftGroupbox('Visuals')
-VisualsGroup:AddLabel('ESP features coming soon')
+local RBGroup = Tabs.Ragebot:AddLeftGroupbox('💀 Ragebot')
 
--- ━━━━━━━━━━━━━━━━━━━━━
--- SETTINGS TAB
--- ━━━━━━━━━━━━━━━━━━━━━
-
-local SettingsGroup = Tabs.Settings:AddLeftGroupbox('Settings')
-
-SettingsGroup:AddToggle('AntiKatana', {
-    Text = 'Anti Katana',
+RBGroup:AddToggle('RagebotEnabled', {
+    Text = 'Enabled',
     Default = false,
-    Tooltip = 'Evade katana dashes',
-    Callback = function(Value)
-        Config.Settings.AntiKatana = Value
+    Callback = function(v)
+        Config.Ragebot.Enabled = v
     end
 })
 
-SettingsGroup:AddButton({
+RBGroup:AddToggle('RagebotVoidSpam', {
+    Text = 'Void Spam',
+    Default = false,
+    Callback = function(v)
+        Config.Ragebot.VoidSpam = v
+        isInVoid = false
+    end
+})
+
+RBGroup:AddSlider('RagebotHide', {
+    Text = 'Hide Interval',
+    Default = 0.25,
+    Min = 0.1,
+    Max = 1,
+    Rounding = 2,
+    Callback = function(v)
+        Config.Ragebot.Hide = v
+    end
+})
+
+RBGroup:AddSlider('RagebotAttack', {
+    Text = 'Attack Interval',
+    Default = 0.1,
+    Min = 0.05,
+    Max = 1,
+    Rounding = 2,
+    Callback = function(v)
+        Config.Ragebot.Attack = v
+    end
+})
+
+--[[
+    ═══════════════════════════════
+        🎨 MISC TAB
+    ═══════════════════════════════
+]]
+
+local ColorGroup = Tabs.Misc:AddLeftGroupbox('🎨 Color Changer')
+
+ColorGroup:AddButton({
+    Text = 'Purple (Contra Band)',
+    Func = function()
+        currentColor = Color3.fromRGB(100, 0, 200)
+        currentStroke = Color3.fromRGB(170, 0, 255)
+        ApplyWeaponColor()
+    end
+})
+
+ColorGroup:AddButton({
+    Text = 'Gold',
+    Func = function()
+        currentColor = Color3.fromRGB(255, 215, 0)
+        currentStroke = Color3.fromRGB(255, 240, 100)
+        ApplyWeaponColor()
+    end
+})
+
+ColorGroup:AddLabel('Custom Color'):AddColorPicker('CustomSlotColor', {
+    Default = Color3.fromRGB(100, 0, 200),
+    Title = 'Pick any color',
+    Callback = function(Value)
+        currentColor = Value
+        currentStroke = Value:lerp(Color3.new(1, 1, 1), 0.3)
+        ApplyWeaponColor()
+    end
+})
+
+local HitGroup = Tabs.Misc:AddRightGroupbox('💥 Hit Numbers')
+
+HitGroup:AddToggle('HitNumbers', {
+    Text = 'Enable Hit Numbers',
+    Default = true,
+    Callback = function(v) hitEnabled = v end
+})
+
+HitGroup:AddLabel('Color'):AddColorPicker('HitColor', {
+    Default = Color3.fromRGB(255, 20, 147),
+    Callback = function(Value) hitColor = Value end
+})
+
+HitGroup:AddSlider('HitDuration', {
+    Text = 'Duration (sec)',
+    Default = 5,
+    Min = 1,
+    Max = 10,
+    Rounding = 1,
+    Callback = function(Value) hitStayTime = Value end
+})
+
+local ArchGroup = Tabs.Misc:AddLeftGroupbox('🏆 Spoofer')
+
+ArchGroup:AddButton({
+    Text = 'Arch Spoofer (5B ELO)',
+    Func = function()
+        loadstring([[
+            local RS = game:GetService("ReplicatedStorage")
+            local LP = game:GetService("Players").LocalPlayer
+            wait(1.5)
+            local SeasonLib = require(
+                RS:WaitForChild("Modules", 5)
+                :WaitForChild("SeasonLibrary", 5)
+            )
+            local fakeELO = 5000000000
+            local myId = LP.UserId
+
+            local oldGetRank = SeasonLib.GetRank
+            SeasonLib.GetRank = function(self, elo, userId, ...)
+                if userId == myId or elo >= 3600 then
+                    return "Archnemesis"
+                end
+                return oldGetRank(self, elo, userId, ...)
+            end
+
+            local oldHighest = SeasonLib
+                .GetHighestELOLeaderboardRanking
+            SeasonLib.GetHighestELOLeaderboardRanking = function(
+                self, elo, userId
+            )
+                if userId == myId then return 1 end
+                return oldHighest(self, elo, userId) or 999999
+            end
+            print("🔥 Arch Spoofer activated")
+        ]])()
+    end
+})
+
+local NoHandsGroup = Tabs.Misc:AddRightGroupbox('✋ No Hands')
+
+NoHandsGroup:AddButton({
+    Text = 'Enable No Hands',
+    Func = function()
+        local MESH_IDS = {
+            "rbxassetid://12307734932",
+            "rbxassetid://12307583853"
+        }
+
+        local function disableMeshes()
+            local count = 0
+            for _, obj in pairs(workspace:GetDescendants()) do
+                local meshId = obj:IsA("MeshPart") and obj.MeshId
+                    or (obj:IsA("SpecialMesh") and obj.MeshId)
+                if meshId and table.find(MESH_IDS, meshId) then
+                    obj.MeshId = "rbxassetid://0"
+                    if obj.TextureId then obj.TextureId = "" end
+                    count += 1
+                end
+            end
+            return count
+        end
+
+        spawn(function()
+            while true do
+                disableMeshes()
+                task.wait(0.5)
+            end
+        end)
+
+        Library:Notify(
+            '✅ No Hands enabled!', 3
+        )
+    end
+})
+
+--[[
+    ═══════════════════════════════
+        🌍 WORLD TAB
+    ═══════════════════════════════
+]]
+
+local SkyGroup = Tabs.World:AddLeftGroupbox('🌑 Dark Sky & Snow')
+
+SkyGroup:AddButton({
+    Text = 'Enable Dark Sky + Snow',
+    Func = function()
+        local DARK_SKY_ID = "rbxassetid://16553660713"
+        local oldIds = {
+            "14147881792", "14147882149", "14147882761",
+            "14147882405", "14147881297"
+        }
+
+        local sky = game.Lighting:FindFirstChildOfClass("Sky")
+        if not sky then
+            sky = Instance.new("Sky")
+            sky.Name = "CustomSky"
+            sky.Parent = game.Lighting
+        end
+
+        local replaced = false
+        for _, prop in ipairs({
+            "SkyboxBk", "SkyboxDn", "SkyboxFt",
+            "SkyboxLf", "SkyboxRt", "SkyboxUp"
+        }) do
+            local current = sky[prop]
+            if current and typeof(current) == "string" then
+                for _, old in ipairs(oldIds) do
+                    if current:find(old) then
+                        sky[prop] = DARK_SKY_ID
+                        replaced = true
+                        break
+                    end
+                end
+            end
+        end
+
+        if not replaced then
+            for _, prop in ipairs({
+                "SkyboxBk", "SkyboxDn", "SkyboxFt",
+                "SkyboxLf", "SkyboxRt", "SkyboxUp"
+            }) do
+                sky[prop] = DARK_SKY_ID
+            end
+        end
+
+        local snowPart = Instance.new("Part")
+        snowPart.Size = Vector3.new(100, 1, 100)
+        snowPart.Transparency = 1
+        snowPart.CanCollide = false
+        snowPart.Anchored = true
+        snowPart.Parent = workspace
+
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = "rbxassetid://5833323391"
+        emitter.Color = ColorSequence.new(
+            Color3.fromRGB(255, 255, 255)
+        )
+        emitter.Size = NumberSequence.new(0.6)
+        emitter.Transparency = NumberSequence.new(0)
+        emitter.Lifetime = NumberRange.new(12, 20)
+        emitter.Rate = 150
+        emitter.Speed = NumberRange.new(5, 10)
+        emitter.SpreadAngle = Vector2.new(30, 30)
+        emitter.Acceleration = Vector3.new(0, -7, 0)
+        emitter.Rotation = NumberRange.new(0, 360)
+        emitter.RotSpeed = NumberRange.new(-30, 30)
+        emitter.Parent = snowPart
+
+        runService.RenderStepped:Connect(function()
+            if snowPart and snowPart.Parent then
+                snowPart.Position = Camera.CFrame.Position
+                    + Vector3.new(0, 35, 0)
+            end
+        end)
+
+        Library:Notify('❄️ Dark Sky + Snow enabled!', 5)
+    end
+})
+
+local SoundsGroup = Tabs.World:AddRightGroupbox('🔊 Sounds')
+
+SoundsGroup:AddButton({
+    Text = 'Enable Sound Replacements',
+    Func = function()
+        local replacements = {
+            [16537337310] = 133426190455626,
+            [16537449730] = 133426190455626,
+            [13110130082] = 103022841301405
+        }
+
+        local function replaceSound(obj)
+            for oldId, newId in pairs(replacements) do
+                if obj.SoundId:find(tostring(oldId)) then
+                    obj.SoundId = "rbxassetid://" .. tostring(newId)
+                    return
+                end
+            end
+        end
+
+        for _, obj in ipairs(game:GetDescendants()) do
+            if obj:IsA("Sound") then replaceSound(obj) end
+        end
+
+        game.DescendantAdded:Connect(function(child)
+            if child:IsA("Sound") then replaceSound(child) end
+        end)
+
+        Library:Notify('🔊 Sound replacements enabled', 4)
+    end
+})
+
+local WorldGroup = Tabs.World:AddLeftGroupbox('🌈 World Effects')
+
+local colorCorrection = Instance.new("ColorCorrectionEffect")
+colorCorrection.Parent = game.Lighting
+colorCorrection.Saturation = 0
+colorCorrection.Contrast = 0.1
+
+local blur = Instance.new("BlurEffect")
+blur.Parent = game.Lighting
+blur.Size = 0
+
+WorldGroup:AddLabel('Screen Tint'):AddColorPicker('WorldColor', {
+    Default = Color3.fromRGB(255, 255, 255),
+    Title = 'Screen Tint Color',
+    Callback = function(Value)
+        colorCorrection.TintColor = Value
+    end
+})
+
+WorldGroup:AddSlider('Saturation', {
+    Text = 'Saturation',
+    Default = 0, Min = -1, Max = 1, Rounding = 1,
+    Callback = function(Value)
+        colorCorrection.Saturation = Value
+    end
+})
+
+WorldGroup:AddSlider('Contrast', {
+    Text = 'Contrast',
+    Default = 0.1, Min = -1, Max = 1, Rounding = 1,
+    Callback = function(Value)
+        colorCorrection.Contrast = Value
+    end
+})
+
+WorldGroup:AddSlider('Blur', {
+    Text = 'Blur',
+    Default = 0, Min = 0, Max = 24, Rounding = 0,
+    Callback = function(Value)
+        blur.Size = Value
+    end
+})
+
+WorldGroup:AddSlider('Brightness', {
+    Text = 'Brightness',
+    Default = 1, Min = 0, Max = 5, Rounding = 1,
+    Callback = function(Value)
+        game.Lighting.Brightness = Value
+    end
+})
+
+--[[
+    ═══════════════════════════════
+        ⚙️ SETTINGS TAB
+    ═══════════════════════════════
+]]
+
+local ConsoleGroup = Tabs.Settings:AddLeftGroupbox('🖥️ Console')
+
+ConsoleGroup:AddToggle('ConsoleToScreen', {
+    Text = 'Console To Screen',
+    Default = true,
+    Callback = function(v) consoleEnabled = v end
+})
+
+ConsoleGroup:AddLabel('Color'):AddColorPicker('ConsoleColor', {
+    Default = Color3.fromRGB(255, 255, 100),
+    Title = 'Console Text Color',
+    Callback = function(Value) consoleTextColor = Value end
+})
+
+ConsoleGroup:AddSlider('ConsoleDuration', {
+    Text = 'Duration (sec)',
+    Default = 4, Min = 1, Max = 10, Rounding = 1,
+    Callback = function(Value) consoleDuration = Value end
+})
+
+local MenuGroup = Tabs.Settings:AddRightGroupbox('⚙️ Main Settings')
+
+MenuGroup:AddButton({
     Text = 'Unload Script',
     Func = function()
-        for _, connection in pairs(Connections) do
-            connection:Disconnect()
+        for _, c in pairs(Connections) do
+            c:Disconnect()
         end
         fovCircle.Visible = false
         fovCircle:Remove()
@@ -741,40 +1130,27 @@ SettingsGroup:AddButton({
     Tooltip = 'Double click to unload'
 })
 
--- ━━━━━━━━━━━━━━━━━━━━━
--- Watermark
--- ━━━━━━━━━━━━━━━━━━━━━
+--[[
+    ═══════════════════════════════
+            THEME & SAVE
+    ═══════════════════════════════
+]]
 
-Library:SetWatermarkVisibility(true)
-Library:SetWatermark(
-    'Rivals | Unnamed Enhancements | ' .. os.date('%H:%M:%S')
-)
-
-task.spawn(function()
-    while Library do
-        task.wait(1)
-        pcall(function()
-            Library:SetWatermark(
-                'Rivals | Unnamed Enhancements | ' .. os.date('%H:%M:%S')
-            )
-        end)
-    end
-end)
-
--- Theme and Save Manager
 ThemeManager:SetLibrary(Library)
-ThemeManager:SetFolder('RivalsUE')
-ThemeManager:ApplyToTab(Tabs.Settings)
-
 SaveManager:SetLibrary(Library)
-SaveManager:SetFolder('RivalsUE/configs')
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+
+ThemeManager:SetFolder('UIChangerRivals')
+SaveManager:SetFolder('UIChangerRivals')
+
 SaveManager:BuildConfigSection(Tabs.Settings)
+ThemeManager:ApplyToTab(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
 Library:Notify(
-    'Rivals UE',
-    'Script loaded! Bugs fixed!',
-    5
+    '✅ UI Changer + Rivals loaded!',
+    6
 )
 
-print("✅ Rivals UE Script Loaded!")
+print("✅ UI Changer + Rivals Loaded!")
