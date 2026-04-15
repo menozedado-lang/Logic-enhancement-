@@ -1,437 +1,1123 @@
 -- ============================================
--- FLY SCRIPT IN BLADE LANGUAGE
--- With Mobile Support
+-- BLADE IDE UI
+-- Complete Integrated Development Environment
+-- for the Blade Scripting Language
 -- ============================================
 
-local flyScript = [[
--- Fly System with Mobile Support
--- Written in Blade Language
+local BladeIDE = {}
+BladeIDE.Version = "2.0.0"
 
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
-local ContextActionService = game:GetService("ContextActionService")
-local GuiService = game:GetService("GuiService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local TextService = game:GetService("TextService")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Fly Settings
-local flySpeed = 50
-local flyEnabled = false
-local mobileFlyEnabled = false
-local verticalSpeed = 30
+-- Theme
+local Theme = {
+    Background = Color3.fromRGB(30, 30, 35),
+    Sidebar = Color3.fromRGB(25, 25, 30),
+    Topbar = Color3.fromRGB(35, 35, 40),
+    Editor = Color3.fromRGB(25, 25, 30),
+    Console = Color3.fromRGB(20, 20, 25),
+    Text = Color3.fromRGB(220, 220, 220),
+    TextDim = Color3.fromRGB(150, 150, 150),
+    Accent = Color3.fromRGB(0, 170, 255),
+    AccentDark = Color3.fromRGB(0, 120, 180),
+    Success = Color3.fromRGB(0, 255, 100),
+    Error = Color3.fromRGB(255, 80, 80),
+    Warning = Color3.fromRGB(255, 200, 0),
+    LineNumber = Color3.fromRGB(100, 100, 100),
+    Keyword = Color3.fromRGB(255, 120, 200),
+    String = Color3.fromRGB(150, 255, 150),
+    Number = Color3.fromRGB(100, 200, 255),
+    Comment = Color3.fromRGB(120, 120, 120),
+    Function = Color3.fromRGB(255, 200, 100),
+    Operator = Color3.fromRGB(200, 200, 200)
+}
 
--- Movement vectors
-local moveVector = Vector3.new(0, 0, 0)
-local flyConnection = nil
-local bodyVelocity = nil
-local bodyGyro = nil
+-- Keywords for syntax highlighting
+local Keywords = {
+    "func", "end", "if", "then", "else", "elseif", "while", "for", "in", "do",
+    "return", "local", "global", "const", "true", "false", "nil", "and", "or", "not",
+    "break", "continue", "class", "extends", "new", "self", "super", "event", "connect",
+    "disconnect", "wait", "spawn", "async", "await", "try", "catch", "throw", "import",
+    "export", "enum", "match", "case", "default"
+}
 
--- Mobile GUI
-local mobileGui = nil
-local flyButton = nil
-local upButton = nil
-local downButton = nil
-
-func createMobileGUI()
-    -- Create ScreenGui
-    mobileGui = Instance.new("ScreenGui")
-    mobileGui.Name = "FlyMobileGUI"
-    mobileGui.ResetOnSpawn = false
-    mobileGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+-- Create main GUI
+function BladeIDE.Create()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "BladeIDE"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     
-    -- Main Fly Button
-    flyButton = Instance.new("TextButton")
-    flyButton.Name = "FlyButton"
-    flyButton.Size = UDim2.new(0, 80, 0, 80)
-    flyButton.Position = UDim2.new(1, -100, 1, -180)
-    flyButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-    flyButton.Text = "FLY"
-    flyButton.TextColor3 = Color3.new(1, 1, 1)
-    flyButton.TextSize = 20
-    flyButton.Font = Enum.Font.GothamBold
-    flyButton.BorderSizePixel = 0
-    flyButton.Parent = mobileGui
-    
-    -- Corner radius
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 20)
-    corner.Parent = flyButton
-    
-    -- Up Button
-    upButton = Instance.new("TextButton")
-    upButton.Name = "UpButton"
-    upButton.Size = UDim2.new(0, 60, 0, 60)
-    upButton.Position = UDim2.new(1, -170, 1, -120)
-    upButton.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
-    upButton.Text = "UP"
-    upButton.TextColor3 = Color3.new(0, 0, 0)
-    upButton.TextSize = 16
-    upButton.Font = Enum.Font.GothamBold
-    upButton.Visible = false
-    upButton.Parent = mobileGui
-    
-    local corner2 = Instance.new("UICorner")
-    corner2.CornerRadius = UDim.new(0, 15)
-    corner2.Parent = upButton
-    
-    -- Down Button
-    downButton = Instance.new("TextButton")
-    downButton.Name = "DownButton"
-    downButton.Size = UDim2.new(0, 60, 0, 60)
-    downButton.Position = UDim2.new(1, -90, 1, -120)
-    downButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
-    downButton.Text = "DOWN"
-    downButton.TextColor3 = Color3.new(0, 0, 0)
-    downButton.TextSize = 14
-    downButton.Font = Enum.Font.GothamBold
-    downButton.Visible = false
-    downButton.Parent = mobileGui
-    
-    local corner3 = Instance.new("UICorner")
-    corner3.CornerRadius = UDim.new(0, 15)
-    corner3.Parent = downButton
-    
-    -- Speed Slider
-    local speedFrame = Instance.new("Frame")
-    speedFrame.Name = "SpeedFrame"
-    speedFrame.Size = UDim2.new(0, 200, 0, 40)
-    speedFrame.Position = UDim2.new(0.5, -100, 1, -60)
-    speedFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    speedFrame.BorderSizePixel = 0
-    speedFrame.Visible = false
-    speedFrame.Parent = mobileGui
-    
-    local corner4 = Instance.new("UICorner")
-    corner4.CornerRadius = UDim.new(0, 10)
-    corner4.Parent = speedFrame
-    
-    local speedLabel = Instance.new("TextLabel")
-    speedLabel.Name = "SpeedLabel"
-    speedLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    speedLabel.BackgroundTransparency = 1
-    speedLabel.Text = "Speed: 50"
-    speedLabel.TextColor3 = Color3.new(1, 1, 1)
-    speedLabel.TextSize = 14
-    speedLabel.Font = Enum.Font.Gotham
-    speedLabel.Parent = speedFrame
-    
-    local speedSlider = Instance.new("TextButton")
-    speedSlider.Name = "SpeedSlider"
-    speedSlider.Size = UDim2.new(0.9, 0, 0.3, 0)
-    speedSlider.Position = UDim2.new(0.05, 0, 0.6, 0)
-    speedSlider.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    speedSlider.Text = ""
-    speedSlider.Parent = speedFrame
-    
-    local corner5 = Instance.new("UICorner")
-    corner5.CornerRadius = UDim.new(0, 5)
-    corner5.Parent = speedSlider
-    
-    -- Parent to CoreGui or PlayerGui
-    if syn then
-        mobileGui.Parent = game:GetService("CoreGui")
+    if syn or gethui then
+        screenGui.Parent = (syn and game:GetService("CoreGui")) or gethui()
     else
-        mobileGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+        screenGui.Parent = PlayerGui
     end
     
-    return mobileGui
+    -- Main frame
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 900, 0, 600)
+    mainFrame.Position = UDim2.new(0.5, -450, 0.5, -300)
+    mainFrame.BackgroundColor3 = Theme.Background
+    mainFrame.BorderSizePixel = 0
+    mainFrame.ClipsDescendants = true
+    mainFrame.Parent = screenGui
+    
+    -- Corner
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = mainFrame
+    
+    -- Shadow
+    local shadow = Instance.new("ImageLabel")
+    shadow.Name = "Shadow"
+    shadow.Size = UDim2.new(1, 40, 1, 40)
+    shadow.Position = UDim2.new(0, -20, 0, -20)
+    shadow.BackgroundTransparency = 1
+    shadow.Image = "rbxassetid://5554236805"
+    shadow.ImageColor3 = Color3.new(0, 0, 0)
+    shadow.ImageTransparency = 0.6
+    shadow.ScaleType = Enum.ScaleType.Slice
+    shadow.SliceCenter = Rect.new(23, 23, 277, 277)
+    shadow.ZIndex = -1
+    shadow.Parent = mainFrame
+    
+    return screenGui, mainFrame
 end
+
+-- Create topbar
+function BladeIDE.CreateTopbar(parent)
+    local topbar = Instance.new("Frame")
+    topbar.Name = "Topbar"
+    topbar.Size = UDim2.new(1, 0, 0, 40)
+    topbar.BackgroundColor3 = Theme.Topbar
+    topbar.BorderSizePixel = 0
+    topbar.Parent = parent
+    
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(0, 200, 1, 0)
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "⚔️ Blade IDE"
+    title.TextColor3 = Theme.Accent
+    title.TextSize = 18
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = topbar
+    
+    -- Version
+    local version = Instance.new("TextLabel")
+    version.Name = "Version"
+    version.Size = UDim2.new(0, 100, 1, 0)
+    version.Position = UDim2.new(0, 140, 0, 0)
+    version.BackgroundTransparency = 1
+    version.Text = "v" .. BladeIDE.Version
+    version.TextColor3 = Theme.TextDim
+    version.TextSize = 12
+    version.Font = Enum.Font.Gotham
+    version.TextXAlignment = Enum.TextXAlignment.Left
+    version.Parent = topbar
+    
+    -- Buttons container
+    local buttons = Instance.new("Frame")
+    buttons.Name = "Buttons"
+    buttons.Size = UDim2.new(0, 400, 1, 0)
+    buttons.Position = UDim2.new(1, -410, 0, 0)
+    buttons.BackgroundTransparency = 1
+    buttons.Parent = topbar
+    
+    -- Create button function
+    local function createButton(name, text, color, pos)
+        local btn = Instance.new("TextButton")
+        btn.Name = name
+        btn.Size = UDim2.new(0, 80, 0, 28)
+        btn.Position = pos
+        btn.BackgroundColor3 = color
+        btn.Text = text
+        btn.TextColor3 = Color3.new(1, 1, 1)
+        btn.TextSize = 12
+        btn.Font = Enum.Font.GothamBold
+        btn.AutoButtonColor = true
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = btn
+        
+        btn.Parent = buttons
+        
+        return btn
+    end
+    
+    -- Run button
+    local runBtn = createButton("Run", "▶ Run", Theme.Success, UDim2.new(0, 5, 0.5, -14))
+    
+    -- Clear button
+    local clearBtn = createButton("Clear", "🗑 Clear", Theme.TextDim, UDim2.new(0, 95, 0.5, -14))
+    
+    -- Save button
+    local saveBtn = createButton("Save", "💾 Save", Theme.Accent, UDim2.new(0, 185, 0.5, -14))
+    
+    -- Load button
+    local loadBtn = createButton("Load", "📂 Load", Theme.AccentDark, UDim2.new(0, 275, 0.5, -14))
+    
+    -- Close button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Name = "Close"
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -35, 0.5, -15)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Theme.Error
+    closeBtn.TextSize = 20
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.Parent = topbar
+    
+    return topbar, runBtn, clearBtn, saveBtn, loadBtn, closeBtn
+end
+
+-- Create sidebar with file explorer
+function BladeIDE.CreateSidebar(parent)
+    local sidebar = Instance.new("Frame")
+    sidebar.Name = "Sidebar"
+    sidebar.Size = UDim2.new(0, 200, 1, -40)
+    sidebar.Position = UDim2.new(0, 0, 0, 40)
+    sidebar.BackgroundColor3 = Theme.Sidebar
+    sidebar.BorderSizePixel = 0
+    sidebar.Parent = parent
+    
+    -- Header
+    local header = Instance.new("TextLabel")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, 0, 0, 35)
+    header.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    header.BorderSizePixel = 0
+    header.Text = "  📁 Explorer"
+    header.TextColor3 = Theme.Text
+    header.TextSize = 14
+    header.Font = Enum.Font.GothamBold
+    header.TextXAlignment = Enum.TextXAlignment.Left
+    header.Parent = sidebar
+    
+    -- File list
+    local fileList = Instance.new("ScrollingFrame")
+    fileList.Name = "FileList"
+    fileList.Size = UDim2.new(1, -10, 1, -80)
+    fileList.Position = UDim2.new(0, 5, 0, 40)
+    fileList.BackgroundTransparency = 1
+    fileList.BorderSizePixel = 0
+    fileList.ScrollBarThickness = 4
+    fileList.ScrollBarImageColor3 = Theme.Accent
+    fileList.Parent = sidebar
+    
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 2)
+    listLayout.Parent = fileList
+    
+    -- New file button
+    local newFileBtn = Instance.new("TextButton")
+    newFileBtn.Name = "NewFile"
+    newFileBtn.Size = UDim2.new(1, -10, 0, 30)
+    newFileBtn.Position = UDim2.new(0, 5, 1, -35)
+    newFileBtn.BackgroundColor3 = Theme.Accent
+    newFileBtn.Text = "+ New File"
+    newFileBtn.TextColor3 = Color3.new(1, 1, 1)
+    newFileBtn.TextSize = 12
+    newFileBtn.Font = Enum.Font.GothamBold
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = newFileBtn
+    
+    newFileBtn.Parent = sidebar
+    
+    -- Templates section
+    local templatesHeader = Instance.new("TextLabel")
+    templatesHeader.Name = "TemplatesHeader"
+    templatesHeader.Size = UDim2.new(1, 0, 0, 30)
+    templatesHeader.Position = UDim2.new(0, 0, 0, 75)
+    templatesHeader.BackgroundTransparency = 1
+    templatesHeader.Text = "  📋 Templates"
+    templatesHeader.TextColor3 = Theme.TextDim
+    templatesHeader.TextSize = 12
+    templatesHeader.Font = Enum.Font.GothamBold
+    templatesHeader.TextXAlignment = Enum.TextXAlignment.Left
+    templatesHeader.Parent = sidebar
+    
+    return sidebar, fileList, newFileBtn
+end
+
+-- Create file button
+function BladeIDE.CreateFileButton(name, parent, callback)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.new(1, 0, 0, 28)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    btn.Text = "  📄 " .. name
+    btn.TextColor3 = Theme.Text
+    btn.TextSize = 12
+    btn.Font = Enum.Font.Gotham
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.AutoButtonColor = true
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 4)
+    corner.Parent = btn
+    
+    btn.MouseButton1Click:Connect(callback)
+    
+    btn.Parent = parent
+    
+    return btn
+end
+
+-- Create code editor
+function BladeIDE.CreateEditor(parent)
+    local editorContainer = Instance.new("Frame")
+    editorContainer.Name = "EditorContainer"
+    editorContainer.Size = UDim2.new(1, -200, 1, -140)
+    editorContainer.Position = UDim2.new(0, 200, 0, 40)
+    editorContainer.BackgroundColor3 = Theme.Editor
+    editorContainer.BorderSizePixel = 0
+    editorContainer.ClipsDescendants = true
+    editorContainer.Parent = parent
+    
+    -- Line numbers
+    local lineNumbers = Instance.new("TextLabel")
+    lineNumbers.Name = "LineNumbers"
+    lineNumbers.Size = UDim2.new(0, 50, 1, 0)
+    lineNumbers.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    lineNumbers.BorderSizePixel = 0
+    lineNumbers.Text = "1"
+    lineNumbers.TextColor3 = Theme.LineNumber
+    lineNumbers.TextSize = 14
+    lineNumbers.Font = Enum.Font.Code
+    lineNumbers.TextXAlignment = Enum.TextXAlignment.Right
+    lineNumbers.TextYAlignment = Enum.TextYAlignment.Top
+    lineNumbers.Parent = editorContainer
+    
+    -- Editor scroll frame
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Name = "ScrollFrame"
+    scrollFrame.Size = UDim2.new(1, -50, 1, 0)
+    scrollFrame.Position = UDim2.new(0, 50, 0, 0)
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.BorderSizePixel = 0
+    scrollFrame.ScrollBarThickness = 8
+    scrollFrame.ScrollBarImageColor3 = Theme.Accent
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 1000)
+    scrollFrame.Parent = editorContainer
+    
+    -- Text box (actual editor)
+    local textBox = Instance.new("TextBox")
+    textBox.Name = "CodeEditor"
+    textBox.Size = UDim2.new(1, -20, 1, 0)
+    textBox.Position = UDim2.new(0, 10, 0, 0)
+    textBox.BackgroundTransparency = 1
+    textBox.Text = ""
+    textBox.TextColor3 = Theme.Text
+    textBox.TextSize = 14
+    textBox.Font = Enum.Font.Code
+    textBox.TextXAlignment = Enum.TextXAlignment.Left
+    textBox.TextYAlignment = Enum.TextYAlignment.Top
+    textBox.ClearTextOnFocus = false
+    textBox.MultiLine = true
+    textBox.TextWrapped = false
+    textBox.Parent = scrollFrame
+    
+    -- Syntax highlighting display (read-only, shows highlighted code)
+    local highlightFrame = Instance.new("Frame")
+    highlightFrame.Name = "HighlightFrame"
+    highlightFrame.Size = UDim2.new(1, -20, 1, 0)
+    highlightFrame.Position = UDim2.new(0, 10, 0, 0)
+    highlightFrame.BackgroundTransparency = 1
+    highlightFrame.ClipsDescendants = true
+    highlightFrame.Parent = scrollFrame
+    
+    -- Tab button
+    local tabFrame = Instance.new("Frame")
+    tabFrame.Name = "TabFrame"
+    tabFrame.Size = UDim2.new(1, 0, 0, 30)
+    tabFrame.Position = UDim2.new(0, 0, 0, 40)
+    tabFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    tabFrame.BorderSizePixel = 0
+    tabFrame.Parent = parent
+    
+    local tab = Instance.new("TextLabel")
+    tab.Name = "CurrentTab"
+    tab.Size = UDim2.new(0, 150, 1, 0)
+    tab.Position = UDim2.new(0, 10, 0, 0)
+    tab.BackgroundColor3 = Theme.Editor
+    tab.BorderSizePixel = 0
+    tab.Text = "  untitled.blade"
+    tab.TextColor3 = Theme.Text
+    tab.TextSize = 12
+    tab.Font = Enum.Font.Gotham
+    tab.TextXAlignment = Enum.TextXAlignment.Left
+    tab.Parent = tabFrame
+    
+    return textBox, lineNumbers, scrollFrame, highlightFrame
+end
+
+-- Update line numbers
+function BladeIDE.UpdateLineNumbers(textBox, lineNumbersLabel)
+    local text = textBox.Text
+    local lines = 1
+    for _ in text:gmatch("\n") do
+        lines = lines + 1
+    end
+    
+    local lineText = ""
+    for i = 1, lines do
+        lineText = lineText .. i .. "\n"
+    end
+    
+    lineNumbersLabel.Text = lineText
+end
+
+-- Simple syntax highlighter
+function BladeIDE.HighlightSyntax(code)
+    local highlighted = code
+    
+    -- Escape special HTML-like characters
+    highlighted = highlighted:gsub("&", "&amp;")
+    highlighted = highlighted:gsub("<", "&lt;")
+    highlighted = highlighted:gsub(">", "&gt;")
+    
+    -- Comments
+    highlighted = highlighted:gsub("(%-%-[^\n]*)", '<font color="#' .. Theme.Comment:ToHex() .. '">%1</font>')
+    
+    -- Strings (double quotes)
+    highlighted = highlighted:gsub('("[^"]*")', '<font color="#' .. Theme.String:ToHex() .. '">%1</font>')
+    
+    -- Strings (single quotes)
+    highlighted = highlighted:gsub("('[^']*')", '<font color="#' .. Theme.String:ToHex() .. '">%1</font>')
+    
+    -- Numbers
+    highlighted = highlighted:gsub("(%d+%.?%d*)", '<font color="#' .. Theme.Number:ToHex() .. '">%1</font>')
+    
+    -- Keywords
+    for _, keyword in ipairs(Keywords) do
+        local pattern = "%f[%a](" .. keyword .. ")%f[^%a]"
+        highlighted = highlighted:gsub(pattern, '<font color="#' .. Theme.Keyword:ToHex() .. '">%1</font>')
+    end
+    
+    -- Functions (words followed by ()
+    highlighted = highlighted:gsub("(%w+)(%s*%()", '<font color="#' .. Theme.Function:ToHex() .. '">%1</font>%2')
+    
+    return highlighted
+end
+
+-- Convert Color3 to hex
+function Color3:ToHex()
+    return string.format("%02X%02X%02X", self.R * 255, self.G * 255, self.B * 255)
+end
+
+-- Create highlighted label
+function BladeIDE.CreateHighlightedLabel(parent, text, position)
+    local label = Instance.new("TextLabel")
+    label.Name = "HighlightedCode"
+    label.Size = UDim2.new(1, 0, 0, 1000)
+    label.Position = position
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Theme.Text
+    label.TextSize = 14
+    label.Font = Enum.Font.Code
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Top
+    label.RichText = true
+    label.TextWrapped = false
+    label.Parent = parent
+    
+    return label
+end
+
+-- Create console
+function BladeIDE.CreateConsole(parent)
+    local consoleContainer = Instance.new("Frame")
+    consoleContainer.Name = "ConsoleContainer"
+    consoleContainer.Size = UDim2.new(1, -200, 0, 100)
+    consoleContainer.Position = UDim2.new(0, 200, 1, -100)
+    consoleContainer.BackgroundColor3 = Theme.Console
+    consoleContainer.BorderSizePixel = 0
+    consoleContainer.Parent = parent
+    
+    -- Header
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, 0, 0, 25)
+    header.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    header.BorderSizePixel = 0
+    header.Parent = consoleContainer
+    
+    local headerLabel = Instance.new("TextLabel")
+    headerLabel.Name = "HeaderLabel"
+    headerLabel.Size = UDim2.new(0, 200, 1, 0)
+    headerLabel.Position = UDim2.new(0, 10, 0, 0)
+    headerLabel.BackgroundTransparency = 1
+    headerLabel.Text = "📟 Console"
+    headerLabel.TextColor3 = Theme.Text
+    headerLabel.TextSize = 12
+    headerLabel.Font = Enum.Font.GothamBold
+    headerLabel.TextXAlignment = Enum.TextXAlignment.Left
+    headerLabel.Parent = header
+    
+    -- Clear console button
+    local clearBtn = Instance.new("TextButton")
+    clearBtn.Name = "ClearConsole"
+    clearBtn.Size = UDim2.new(0, 60, 0, 20)
+    clearBtn.Position = UDim2.new(1, -70, 0.5, -10)
+    clearBtn.BackgroundColor3 = Theme.TextDim
+    clearBtn.Text = "Clear"
+    clearBtn.TextColor3 = Color3.new(1, 1, 1)
+    clearBtn.TextSize = 10
+    clearBtn.Font = Enum.Font.GothamBold
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 4)
+    corner.Parent = clearBtn
+    
+    clearBtn.Parent = header
+    
+    -- Console output
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Name = "ConsoleScroll"
+    scrollFrame.Size = UDim2.new(1, -10, 1, -35)
+    scrollFrame.Position = UDim2.new(0, 5, 0, 30)
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.BorderSizePixel = 0
+    scrollFrame.ScrollBarThickness = 4
+    scrollFrame.ScrollBarImageColor3 = Theme.Accent
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 100)
+    scrollFrame.Parent = consoleContainer
+    
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 2)
+    listLayout.Parent = scrollFrame
+    
+    -- Input box
+    local inputBox = Instance.new("TextBox")
+    inputBox.Name = "ConsoleInput"
+    inputBox.Size = UDim2.new(1, -10, 0, 25)
+    inputBox.Position = UDim2.new(0, 5, 1, -30)
+    inputBox.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    inputBox.Text = ""
+    inputBox.PlaceholderText = "> Enter command..."
+    inputBox.TextColor3 = Theme.Text
+    inputBox.PlaceholderColor3 = Theme.TextDim
+    inputBox.TextSize = 12
+    inputBox.Font = Enum.Font.Code
+    inputBox.ClearTextOnFocus = false
+    
+    local corner2 = Instance.new("UICorner")
+    corner2.CornerRadius = UDim.new(0, 4)
+    corner2.Parent = inputBox
+    
+    inputBox.Parent = consoleContainer
+    
+    return scrollFrame, inputBox, clearBtn
+end
+
+-- Add console message
+function BladeIDE.ConsolePrint(consoleScroll, text, messageType)
+    messageType = messageType or "normal" -- normal, error, warning, success
+    
+    local colors = {
+        normal = Theme.Text,
+        error = Theme.Error,
+        warning = Theme.Warning,
+        success = Theme.Success,
+        info = Theme.Accent
+    }
+    
+    local prefix = {
+        normal = "",
+        error = "[ERROR] ",
+        warning = "[WARN] ",
+        success = "[OK] ",
+        info = "[INFO] "
+    }
+    
+    local message = Instance.new("TextLabel")
+    message.Name = "Message"
+    message.Size = UDim2.new(1, -10, 0, 20)
+    message.BackgroundTransparency = 1
+    message.Text = prefix[messageType] .. tostring(text)
+    message.TextColor3 = colors[messageType]
+    message.TextSize = 12
+    message.Font = Enum.Font.Code
+    message.TextXAlignment = Enum.TextXAlignment.Left
+    message.TextWrapped = true
+    message.Parent = consoleScroll
+    
+    -- Adjust canvas size
+    local totalHeight = 0
+    for _, child in ipairs(consoleScroll:GetChildren()) do
+        if child:IsA("TextLabel") then
+            totalHeight = totalHeight + 22
+        end
+    end
+    
+    consoleScroll.CanvasSize = UDim2.new(0, 0, 0, totalHeight)
+    consoleScroll.CanvasPosition = Vector2.new(0, totalHeight)
+    
+    return message
+end
+
+-- Code templates
+BladeIDE.Templates = {
+    ["Hello World"] = [[-- Hello World in Blade
+func main()
+    print("Hello, World!")
+    print("Welcome to Blade language!")
+end
+
+main()
+]],
+    
+    ["Fly Script"] = [[-- Fly Script in Blade
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local flyEnabled = false
+local flySpeed = 50
 
 func enableFly()
     local character = LocalPlayer.Character
     if not character then return end
     
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
     local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
     
-    if not humanoid or not rootPart then return end
-    
-    -- Create BodyVelocity for movement
-    bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
     bodyVelocity.Parent = rootPart
     
-    -- Create BodyGyro for rotation
-    bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    bodyGyro.P = 10000
-    bodyGyro.Parent = rootPart
+    flyEnabled = true
     
-    -- Disable gravity
-    humanoid.PlatformStand = true
-    
-    -- Fly loop
-    flyConnection = RunService.RenderStepped:Connect(func()
-        if not flyEnabled then return end
-        
+    while flyEnabled do
         local moveDir = Vector3.new(0, 0, 0)
         
-        -- Keyboard input (PC)
         if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            moveDir = moveDir + Camera.CFrame.LookVector
+            moveDir = moveDir + workspace.CurrentCamera.CFrame.LookVector
         end
         if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            moveDir = moveDir - Camera.CFrame.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            moveDir = moveDir - Camera.CFrame.RightVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            moveDir = moveDir + Camera.CFrame.RightVector
+            moveDir = moveDir - workspace.CurrentCamera.CFrame.LookVector
         end
         if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
             moveDir = moveDir + Vector3.new(0, 1, 0)
         end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-            moveDir = moveDir - Vector3.new(0, 1, 0)
-        end
         
-        -- Mobile input
-        if mobileFlyEnabled then
-            -- Use thumbstick or touch
-            local touchMove = moveVector
-            moveDir = moveDir + (Camera.CFrame.LookVector * touchMove.Z + Camera.CFrame.RightVector * touchMove.X)
-        end
-        
-        -- Normalize and apply speed
         if moveDir.Magnitude > 0 then
-            moveDir = moveDir.Unit * flySpeed
+            bodyVelocity.Velocity = moveDir.Unit * flySpeed
+        else
+            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
         end
         
-        -- Update velocity
-        if bodyVelocity then
-            bodyVelocity.Velocity = moveDir
-        end
-        
-        -- Update gyro to match camera
-        if bodyGyro then
-            bodyGyro.CFrame = Camera.CFrame
-        end
-    end)
+        wait()
+    end
     
-    flyEnabled = true
+    bodyVelocity:Destroy()
 end
 
-func disableFly()
-    flyEnabled = false
-    
-    if flyConnection then
-        flyConnection:Disconnect()
-        flyConnection = nil
-    end
-    
-    if bodyVelocity then
-        bodyVelocity:Destroy()
-        bodyVelocity = nil
-    end
-    
-    if bodyGyro then
-        bodyGyro:Destroy()
-        bodyGyro = nil
-    end
-    
-    local character = LocalCharacter
-    if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid.PlatformStand = false
+-- Press F to toggle fly
+UserInputService.InputBegan:Connect(func(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.F and not gameProcessed then
+        if flyEnabled then
+            flyEnabled = false
+        else
+            spawn(enableFly)
         end
     end
+end)
+
+print("Press F to fly!")
+]],
+    
+    ["ESP Script"] = [[-- ESP Script in Blade
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local ESPObjects = {}
+
+func createESP(player)
+    if player == LocalPlayer then return end
+    
+    local box = Drawing.new("Square")
+    box.Thickness = 1
+    box.Filled = false
+    box.Color = Color3.fromRGB(255, 0, 0)
+    
+    ESPObjects[player] = box
 end
 
-func toggleFly()
-    if flyEnabled then
-        disableFly()
-        if flyButton then
-            flyButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-            flyButton.Text = "FLY"
+func updateESP()
+    for player, box in pairs(ESPObjects) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local pos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(
+                player.Character.HumanoidRootPart.Position
+            )
+            
+            if onScreen then
+                box.Size = Vector2.new(50, 80)
+                box.Position = Vector2.new(pos.X - 25, pos.Y - 40)
+                box.Visible = true
+            else
+                box.Visible = false
+            end
+        else
+            box.Visible = false
         end
-        if upButton then upButton.Visible = false end
-        if downButton then downButton.Visible = false end
-    else
-        enableFly()
-        if flyButton then
-            flyButton.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-            flyButton.Text = "STOP"
-        end
-        if upButton then upButton.Visible = true end
-        if downButton then downButton.Visible = true end
     end
 end
 
-func setupMobileControls()
-    createMobileGUI()
+-- Create ESP for all players
+for _, player in pairs(Players:GetPlayers()) do
+    createESP(player)
+end
+
+Players.PlayerAdded:Connect(createESP)
+
+RunService.RenderStepped:Connect(updateESP)
+
+print("ESP Enabled!")
+]],
     
-    -- Fly button
-    flyButton.MouseButton1Click:Connect(func()
-        toggleFly()
-    end)
+    ["Auto Farm"] = [[-- Auto Farm in Blade
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local autoFarmEnabled = false
+
+func getNearestEnemy()
+    local character = LocalPlayer.Character
+    if not character then return nil end
     
-    -- Up button (hold)
-    local upConnection = nil
-    upButton.InputBegan:Connect(func(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            upConnection = RunService.RenderStepped:Connect(func()
-                if bodyVelocity then
-                    bodyVelocity.Velocity = bodyVelocity.Velocity + Vector3.new(0, verticalSpeed, 0)
-                end
-            end)
-        end
-    end)
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
     
-    upButton.InputEnded:Connect(func(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            if upConnection then
-                upConnection:Disconnect()
-                upConnection = nil
+    local nearest = nil
+    local shortestDist = math.huge
+    
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
+            local dist = (rootPart.Position - obj.HumanoidRootPart.Position).Magnitude
+            if dist < shortestDist and dist < 50 then
+                shortestDist = dist
+                nearest = obj
             end
         end
-    end)
+    end
     
-    -- Down button (hold)
-    local downConnection = nil
-    downButton.InputBegan:Connect(func(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            downConnection = RunService.RenderStepped:Connect(func()
-                if bodyVelocity then
-                    bodyVelocity.Velocity = bodyVelocity.Velocity - Vector3.new(0, verticalSpeed, 0)
-                end
-            end)
-        end
-    end)
-    
-    downButton.InputEnded:Connect(func(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            if downConnection then
-                downConnection:Disconnect()
-                downConnection = nil
+    return nearest
+end
+
+func autoFarm()
+    while autoFarmEnabled do
+        local enemy = getNearestEnemy()
+        if enemy then
+            local rootPart = LocalPlayer.Character.HumanoidRootPart
+            local enemyRoot = enemy.HumanoidRootPart
+            
+            -- Teleport to enemy
+            rootPart.CFrame = enemyRoot.CFrame * CFrame.new(0, 0, 5)
+            
+            -- Attack
+            local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+            if tool then
+                tool:Activate()
             end
         end
-    end)
+        wait(0.1)
+    end
+end
+
+-- Toggle with T
+local UserInputService = game:GetService("UserInputService")
+UserInputService.InputBegan:Connect(func(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.T and not gameProcessed then
+        autoFarmEnabled = not autoFarmEnabled
+        if autoFarmEnabled then
+            spawn(autoFarm)
+            print("Auto Farm Enabled!")
+        else
+            print("Auto Farm Disabled!")
+        end
+    end
+end)
+
+print("Press T to toggle Auto Farm")
+]],
     
-    -- Touch movement (thumbstick style)
-    local touchStartPos = nil
-    local touchGui = Instance.new("ScreenGui")
-    touchGui.Name = "TouchControls"
-    touchGui.ResetOnSpawn = false
-    
-    local touchFrame = Instance.new("Frame")
-    touchFrame.Name = "TouchFrame"
-    touchFrame.Size = UDim2.new(0, 150, 0, 150)
-    touchFrame.Position = UDim2.new(0, 20, 1, -170)
-    touchFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    touchFrame.BackgroundTransparency = 0.5
-    touchFrame.BorderSizePixel = 0
-    touchFrame.Visible = false
-    touchFrame.Parent = touchGui
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0.5, 0)
-    corner.Parent = touchFrame
-    
-    local knob = Instance.new("Frame")
-    knob.Name = "Knob"
-    knob.Size = UDim2.new(0, 50, 0, 50)
-    knob.Position = UDim2.new(0.5, -25, 0.5, -25)
-    knob.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-    knob.BorderSizePixel = 0
-    knob.Parent = touchFrame
-    
-    local corner2 = Instance.new("UICorner")
-    corner2.CornerRadius = UDim.new(0.5, 0)
-    corner2.Parent = knob
+    ["GUI Example"] = [[-- GUI Example in Blade
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+func createGUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "BladeGUI"
+    screenGui.ResetOnSpawn = false
     
     if syn then
-        touchGui.Parent = game:GetService("CoreGui")
+        screenGui.Parent = game:GetService("CoreGui")
     else
-        touchGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+        screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
     
-    -- Touch handling
-    local activeTouch = nil
+    local frame = Instance.new("Frame")
+    frame.Name = "MainFrame"
+    frame.Size = UDim2.new(0, 300, 0, 200)
+    frame.Position = UDim2.new(0.5, -150, 0.5, -100)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    frame.BorderSizePixel = 0
     
-    touchFrame.InputBegan:Connect(func(input)
-        if input.UserInputType == Enum.UserInputType.Touch and not activeTouch then
-            activeTouch = input
-            touchStartPos = Vector2.new(input.Position.X, input.Position.Y)
-            touchFrame.Visible = true
-        end
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = frame
+    
+    frame.Parent = screenGui
+    
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 40)
+    title.BackgroundTransparency = 1
+    title.Text = "My Blade GUI"
+    title.TextColor3 = Color3.fromRGB(0, 170, 255)
+    title.TextSize = 20
+    title.Font = Enum.Font.GothamBold
+    title.Parent = frame
+    
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 200, 0, 50)
+    button.Position = UDim2.new(0.5, -100, 0.5, -10)
+    button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    button.Text = "Click Me!"
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextSize = 16
+    button.Font = Enum.Font.GothamBold
+    
+    local corner2 = Instance.new("UICorner")
+    corner2.CornerRadius = UDim.new(0, 8)
+    corner2.Parent = button
+    
+    button.Parent = frame
+    
+    local clickCount = 0
+    button.MouseButton1Click:Connect(func()
+        clickCount = clickCount + 1
+        button.Text = "Clicked " .. clickCount .. " times!"
     end)
     
-    UserInputService.InputChanged:Connect(func(input)
-        if input == activeTouch then
-            local delta = Vector2.new(input.Position.X, input.Position.Y) - touchStartPos
-            local maxDist = 50
-            
-            if delta.Magnitude > maxDist then
-                delta = delta.Unit * maxDist
+    return screenGui
+end
+
+createGUI()
+print("GUI Created!")
+]]
+}
+
+-- Load template
+function BladeIDE.LoadTemplate(name, textBox)
+    if BladeIDE.Templates[name] then
+        textBox.Text = BladeIDE.Templates[name]
+        return true
+    end
+    return false
+end
+
+-- Initialize complete IDE
+function BladeIDE.Init()
+    local screenGui, mainFrame = BladeIDE.Create()
+    local topbar, runBtn, clearBtn, saveBtn, loadBtn, closeBtn = BladeIDE.CreateTopbar(mainFrame)
+    local sidebar, fileList, newFileBtn = BladeIDE.CreateSidebar(mainFrame)
+    local textBox, lineNumbers, scrollFrame, highlightFrame = BladeIDE.CreateEditor(mainFrame)
+    local consoleScroll, consoleInput, clearConsoleBtn = BladeIDE.CreateConsole(mainFrame)
+    
+    -- Current file tracking
+    local currentFile = "untitled.blade"
+    local files = {}
+    
+    -- Console print function
+    local function consolePrint(text, msgType)
+        BladeIDE.ConsolePrint(consoleScroll, text, msgType)
+    end
+    
+    -- Update line numbers on text change
+    textBox:GetPropertyChangedSignal("Text"):Connect(function()
+        BladeIDE.UpdateLineNumbers(textBox, lineNumbers)
+    end)
+    
+    -- Run button
+    runBtn.MouseButton1Click:Connect(function()
+        local code = textBox.Text
+        if #code == 0 then
+            consolePrint("No code to run!", "error")
+            return
+        end
+        
+        consolePrint("Compiling...", "info")
+        
+        local success, result = pcall(function()
+            -- Check if Blade is loaded
+            if not _G.Blade then
+                -- Load Blade if not available
+                loadstring(game:HttpGet('https://pastebin.com/raw/XXXXX'))() -- Replace with actual URL
             end
             
-            knob.Position = UDim2.new(0.5, delta.X - 25, 0.5, delta.Y - 25)
+            return _G.Blade.Execute(code, {
+                game = game,
+                workspace = workspace,
+                print = function(...) 
+                    local args = {...}
+                    local str = ""
+                    for i, v in ipairs(args) do
+                        str = str .. tostring(v) .. " "
+                    end
+                    consolePrint(str, "normal")
+                end,
+                wait = wait,
+                spawn = spawn,
+                delay = delay,
+                tick = tick,
+                time = time,
+                typeof = typeof,
+                type = type,
+                pcall = pcall,
+                xpcall = xpcall,
+                error = error,
+                assert = assert,
+                math = math,
+                table = table,
+                string = string,
+                coroutine = coroutine,
+                debug = debug,
+                os = os,
+                ipairs = ipairs,
+                pairs = pairs,
+                next = next,
+                tonumber = tonumber,
+                tostring = tostring,
+                unpack = unpack,
+                select = select,
+                rawget = rawget,
+                rawset = rawset,
+                rawequal = rawequal,
+                setmetatable = setmetatable,
+                getmetatable = getmetatable,
+                _G = _G,
+                shared = shared,
+                script = script,
+                require = require,
+                loadstring = loadstring,
+                Instance = Instance,
+                Vector3 = Vector3,
+                Vector2 = Vector2,
+                Color3 = Color3,
+                UDim = UDim,
+                UDim2 = UDim2,
+                CFrame = CFrame,
+                Enum = Enum,
+                Ray = Ray,
+                Region3 = Region3,
+                BrickColor = BrickColor,
+                NumberRange = NumberRange,
+                NumberSequence = NumberSequence,
+                ColorSequence = ColorSequence
+            })
+        end)
+        
+        if success then
+            consolePrint("Script executed successfully!", "success")
+        else
+            consolePrint("Error: " .. tostring(result), "error")
+        end
+    end)
+    
+    -- Clear button
+    clearBtn.MouseButton1Click:Connect(function()
+        textBox.Text = ""
+        consolePrint("Editor cleared", "info")
+    end)
+    
+    -- Save button
+    saveBtn.MouseButton1Click:Connect(function()
+        local code = textBox.Text
+        if #code == 0 then
+            consolePrint("Nothing to save!", "warning")
+            return
+        end
+        
+        files[currentFile] = code
+        
+        -- Save to file (using writefile if available)
+        if writefile then
+            local success, err = pcall(function()
+                writefile(currentFile, code)
+            end)
+            if success then
+                consolePrint("Saved to " .. currentFile, "success")
+            else
+                consolePrint("Save error: " .. tostring(err), "error")
+            end
+        else
+            consolePrint("Saved to memory (writefile not available)", "success")
+        end
+    end)
+    
+    -- Load button
+    loadBtn.MouseButton1Click:Connect(function()
+        if readfile then
+            local success, content = pcall(function()
+                return readfile(currentFile)
+            end)
+            if success and content then
+                textBox.Text = content
+                consolePrint("Loaded " .. currentFile, "success")
+            else
+                consolePrint("Load error or file not found", "error")
+            end
+        else
+            if files[currentFile] then
+                textBox.Text = files[currentFile]
+                consolePrint("Loaded from memory", "success")
+            else
+                consolePrint("No file in memory", "error")
+            end
+        end
+    end)
+    
+    -- Close button
+    closeBtn.MouseButton1Click:Connect(function()
+        mainFrame:TweenSize(UDim2.new(0, 0, 0, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.3, true, function()
+            screenGui:Destroy()
+        end)
+    end)
+    
+    -- New file button
+    newFileBtn.MouseButton1Click:Connect(function()
+        currentFile = "script" .. (#files + 1) .. ".blade"
+        textBox.Text = ""
+        consolePrint("Created new file: " .. currentFile, "info")
+    end)
+    
+    -- Clear console button
+    clearConsoleBtn.MouseButton1Click:Connect(function()
+        for _, child in ipairs(consoleScroll:GetChildren()) do
+            if child:IsA("TextLabel") then
+                child:Destroy()
+            end
+        end
+        consoleScroll.CanvasSize = UDim2.new(0, 0, 0, 100)
+    end)
+    
+    -- Console input
+    consoleInput.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local cmd = consoleInput.Text
+            consolePrint("> " .. cmd, "info")
             
-            -- Normalize to -1 to 1
-            moveVector = Vector3.new(delta.X / maxDist, 0, -delta.Y / maxDist)
-            mobileFlyEnabled = true
+            -- Execute command
+            local success, result = pcall(function()
+                return loadstring(cmd)()
+            end)
+            
+            if success then
+                if result then
+                    consolePrint(tostring(result), "normal")
+                end
+            else
+                consolePrint(tostring(result), "error")
+            end
+            
+            consoleInput.Text = ""
         end
     end)
     
-    UserInputService.InputEnded:Connect(func(input)
-        if input == activeTouch then
-            activeTouch = nil
-            knob.Position = UDim2.new(0.5, -25, 0.5, -25)
-            moveVector = Vector3.new(0, 0, 0)
-            mobileFlyEnabled = false
-        end
-    end)
-end
-
-func setupPCControls()
-    UserInputService.InputBegan:Connect(func(input, gameProcessed)
-        if gameProcessed then return end
-        
-        if input.KeyCode == Enum.KeyCode.F then
-            toggleFly()
-        end
-        
-        if input.KeyCode == Enum.KeyCode.LeftShift then
-            flySpeed = flySpeed * 2
-        end
-    end)
-    
-    UserInputService.InputEnded:Connect(func(input)
-        if input.KeyCode == Enum.KeyCode.LeftShift then
-            flySpeed = flySpeed / 2
-        end
-    end)
-end
-
-func init()
-    -- Detect if mobile
-    local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-    
-    if isMobile then
-        setupMobileControls()
-    else
-        setupPCControls()
+    -- Create template buttons
+    for templateName, _ in pairs(BladeIDE.Templates) do
+        BladeIDE.CreateFileButton(templateName, fileList, function()
+            BladeIDE.LoadTemplate(templateName, textBox)
+            consolePrint("Loaded template: " .. templateName, "info")
+        end)
     end
     
-    -- Handle character respawn
-    LocalPlayer.CharacterAdded:Connect(func(char)
-        if flyEnabled then
-            wait(0.5)
-            disableFly()
-            wait(0.1)
-            enableFly()
+    -- Make draggable
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    
+    topbar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
         end
     end)
     
-    print("Fly script loaded! Press F to fly (PC) or use the GUI (Mobile)")
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    -- Welcome message
+    consolePrint("Blade IDE v" .. BladeIDE.Version .. " loaded!", "success")
+    consolePrint("Select a template from the sidebar or start coding!", "info")
+    
+    return BladeIDE
 end
 
--- Start
-init()
-]]
+-- Auto-init
+BladeIDE.Init()
+
+-- ============================================
+-- BLADE IDE - QUICK LOAD
+-- Just execute this to load the full IDE
+-- ============================================
+
+-- This would be hosted on a paste service
+local IDE_URL = "https://pastebin.com/raw/XXXXX" -- Replace with actual URL
+
+-- Load and execute
+local success, result = pcall(function()
+    local code = game:HttpGet(IDE_URL)
+    return loadstring(code)()
+end)
+
+if success then
+    print("Blade IDE loaded successfully!")
+else
+    print("Failed to load Blade IDE:", result)
+end
+
+-- OR load the chunks above directly
+-- Copy chunks 1-8 in order to use the full IDE
