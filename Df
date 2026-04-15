@@ -1,1123 +1,1047 @@
--- ============================================
--- BLADE IDE UI
--- Complete Integrated Development Environment
--- for the Blade Scripting Language
--- ============================================
-
-local BladeIDE = {}
-BladeIDE.Version = "2.0.0"
+-- Load Rayfield UI Library
+local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/SiriusSoftwareLtd/Rayfield/main/source.lua'))()
 
 -- Services
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local HttpService = game:GetService("HttpService")
-local TextService = game:GetService("TextService")
-
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Mouse = LocalPlayer:GetMouse
 
--- Theme
-local Theme = {
-    Background = Color3.fromRGB(30, 30, 35),
-    Sidebar = Color3.fromRGB(25, 25, 30),
-    Topbar = Color3.fromRGB(35, 35, 40),
-    Editor = Color3.fromRGB(25, 25, 30),
-    Console = Color3.fromRGB(20, 20, 25),
-    Text = Color3.fromRGB(220, 220, 220),
-    TextDim = Color3.fromRGB(150, 150, 150),
-    Accent = Color3.fromRGB(0, 170, 255),
-    AccentDark = Color3.fromRGB(0, 120, 180),
-    Success = Color3.fromRGB(0, 255, 100),
-    Error = Color3.fromRGB(255, 80, 80),
-    Warning = Color3.fromRGB(255, 200, 0),
-    LineNumber = Color3.fromRGB(100, 100, 100),
-    Keyword = Color3.fromRGB(255, 120, 200),
-    String = Color3.fromRGB(150, 255, 150),
-    Number = Color3.fromRGB(100, 200, 255),
-    Comment = Color3.fromRGB(120, 120, 120),
-    Function = Color3.fromRGB(255, 200, 100),
-    Operator = Color3.fromRGB(200, 200, 200)
-}
+-- Anti-Cheat Variables
+local CheatDetectedEvent = ReplicatedStorage:WaitForChild("CheatDetectedEvent")
+local AntiCheatBypassed = false
+local SpoofedValues = {}
+local OriginalNamecall
+local OriginalIndex
+local OriginalNewIndex
 
--- Keywords for syntax highlighting
-local Keywords = {
-    "func", "end", "if", "then", "else", "elseif", "while", "for", "in", "do",
-    "return", "local", "global", "const", "true", "false", "nil", "and", "or", "not",
-    "break", "continue", "class", "extends", "new", "self", "super", "event", "connect",
-    "disconnect", "wait", "spawn", "async", "await", "try", "catch", "throw", "import",
-    "export", "enum", "match", "case", "default"
-}
-
--- Create main GUI
-function BladeIDE.Create()
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "BladeIDE"
-    screenGui.ResetOnSpawn = false
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    
-    if syn or gethui then
-        screenGui.Parent = (syn and game:GetService("CoreGui")) or gethui()
-    else
-        screenGui.Parent = PlayerGui
-    end
-    
-    -- Main frame
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 900, 0, 600)
-    mainFrame.Position = UDim2.new(0.5, -450, 0.5, -300)
-    mainFrame.BackgroundColor3 = Theme.Background
-    mainFrame.BorderSizePixel = 0
-    mainFrame.ClipsDescendants = true
-    mainFrame.Parent = screenGui
-    
-    -- Corner
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = mainFrame
-    
-    -- Shadow
-    local shadow = Instance.new("ImageLabel")
-    shadow.Name = "Shadow"
-    shadow.Size = UDim2.new(1, 40, 1, 40)
-    shadow.Position = UDim2.new(0, -20, 0, -20)
-    shadow.BackgroundTransparency = 1
-    shadow.Image = "rbxassetid://5554236805"
-    shadow.ImageColor3 = Color3.new(0, 0, 0)
-    shadow.ImageTransparency = 0.6
-    shadow.ScaleType = Enum.ScaleType.Slice
-    shadow.SliceCenter = Rect.new(23, 23, 277, 277)
-    shadow.ZIndex = -1
-    shadow.Parent = mainFrame
-    
-    return screenGui, mainFrame
-end
-
--- Create topbar
-function BladeIDE.CreateTopbar(parent)
-    local topbar = Instance.new("Frame")
-    topbar.Name = "Topbar"
-    topbar.Size = UDim2.new(1, 0, 0, 40)
-    topbar.BackgroundColor3 = Theme.Topbar
-    topbar.BorderSizePixel = 0
-    topbar.Parent = parent
-    
-    -- Title
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(0, 200, 1, 0)
-    title.Position = UDim2.new(0, 15, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "⚔️ Blade IDE"
-    title.TextColor3 = Theme.Accent
-    title.TextSize = 18
-    title.Font = Enum.Font.GothamBold
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = topbar
-    
-    -- Version
-    local version = Instance.new("TextLabel")
-    version.Name = "Version"
-    version.Size = UDim2.new(0, 100, 1, 0)
-    version.Position = UDim2.new(0, 140, 0, 0)
-    version.BackgroundTransparency = 1
-    version.Text = "v" .. BladeIDE.Version
-    version.TextColor3 = Theme.TextDim
-    version.TextSize = 12
-    version.Font = Enum.Font.Gotham
-    version.TextXAlignment = Enum.TextXAlignment.Left
-    version.Parent = topbar
-    
-    -- Buttons container
-    local buttons = Instance.new("Frame")
-    buttons.Name = "Buttons"
-    buttons.Size = UDim2.new(0, 400, 1, 0)
-    buttons.Position = UDim2.new(1, -410, 0, 0)
-    buttons.BackgroundTransparency = 1
-    buttons.Parent = topbar
-    
-    -- Create button function
-    local function createButton(name, text, color, pos)
-        local btn = Instance.new("TextButton")
-        btn.Name = name
-        btn.Size = UDim2.new(0, 80, 0, 28)
-        btn.Position = pos
-        btn.BackgroundColor3 = color
-        btn.Text = text
-        btn.TextColor3 = Color3.new(1, 1, 1)
-        btn.TextSize = 12
-        btn.Font = Enum.Font.GothamBold
-        btn.AutoButtonColor = true
-        
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 6)
-        corner.Parent = btn
-        
-        btn.Parent = buttons
-        
-        return btn
-    end
-    
-    -- Run button
-    local runBtn = createButton("Run", "▶ Run", Theme.Success, UDim2.new(0, 5, 0.5, -14))
-    
-    -- Clear button
-    local clearBtn = createButton("Clear", "🗑 Clear", Theme.TextDim, UDim2.new(0, 95, 0.5, -14))
-    
-    -- Save button
-    local saveBtn = createButton("Save", "💾 Save", Theme.Accent, UDim2.new(0, 185, 0.5, -14))
-    
-    -- Load button
-    local loadBtn = createButton("Load", "📂 Load", Theme.AccentDark, UDim2.new(0, 275, 0.5, -14))
-    
-    -- Close button
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Name = "Close"
-    closeBtn.Size = UDim2.new(0, 30, 0, 30)
-    closeBtn.Position = UDim2.new(1, -35, 0.5, -15)
-    closeBtn.BackgroundTransparency = 1
-    closeBtn.Text = "✕"
-    closeBtn.TextColor3 = Theme.Error
-    closeBtn.TextSize = 20
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.Parent = topbar
-    
-    return topbar, runBtn, clearBtn, saveBtn, loadBtn, closeBtn
-end
-
--- Create sidebar with file explorer
-function BladeIDE.CreateSidebar(parent)
-    local sidebar = Instance.new("Frame")
-    sidebar.Name = "Sidebar"
-    sidebar.Size = UDim2.new(0, 200, 1, -40)
-    sidebar.Position = UDim2.new(0, 0, 0, 40)
-    sidebar.BackgroundColor3 = Theme.Sidebar
-    sidebar.BorderSizePixel = 0
-    sidebar.Parent = parent
-    
-    -- Header
-    local header = Instance.new("TextLabel")
-    header.Name = "Header"
-    header.Size = UDim2.new(1, 0, 0, 35)
-    header.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-    header.BorderSizePixel = 0
-    header.Text = "  📁 Explorer"
-    header.TextColor3 = Theme.Text
-    header.TextSize = 14
-    header.Font = Enum.Font.GothamBold
-    header.TextXAlignment = Enum.TextXAlignment.Left
-    header.Parent = sidebar
-    
-    -- File list
-    local fileList = Instance.new("ScrollingFrame")
-    fileList.Name = "FileList"
-    fileList.Size = UDim2.new(1, -10, 1, -80)
-    fileList.Position = UDim2.new(0, 5, 0, 40)
-    fileList.BackgroundTransparency = 1
-    fileList.BorderSizePixel = 0
-    fileList.ScrollBarThickness = 4
-    fileList.ScrollBarImageColor3 = Theme.Accent
-    fileList.Parent = sidebar
-    
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Padding = UDim.new(0, 2)
-    listLayout.Parent = fileList
-    
-    -- New file button
-    local newFileBtn = Instance.new("TextButton")
-    newFileBtn.Name = "NewFile"
-    newFileBtn.Size = UDim2.new(1, -10, 0, 30)
-    newFileBtn.Position = UDim2.new(0, 5, 1, -35)
-    newFileBtn.BackgroundColor3 = Theme.Accent
-    newFileBtn.Text = "+ New File"
-    newFileBtn.TextColor3 = Color3.new(1, 1, 1)
-    newFileBtn.TextSize = 12
-    newFileBtn.Font = Enum.Font.GothamBold
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = newFileBtn
-    
-    newFileBtn.Parent = sidebar
-    
-    -- Templates section
-    local templatesHeader = Instance.new("TextLabel")
-    templatesHeader.Name = "TemplatesHeader"
-    templatesHeader.Size = UDim2.new(1, 0, 0, 30)
-    templatesHeader.Position = UDim2.new(0, 0, 0, 75)
-    templatesHeader.BackgroundTransparency = 1
-    templatesHeader.Text = "  📋 Templates"
-    templatesHeader.TextColor3 = Theme.TextDim
-    templatesHeader.TextSize = 12
-    templatesHeader.Font = Enum.Font.GothamBold
-    templatesHeader.TextXAlignment = Enum.TextXAlignment.Left
-    templatesHeader.Parent = sidebar
-    
-    return sidebar, fileList, newFileBtn
-end
-
--- Create file button
-function BladeIDE.CreateFileButton(name, parent, callback)
-    local btn = Instance.new("TextButton")
-    btn.Name = name
-    btn.Size = UDim2.new(1, 0, 0, 28)
-    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    btn.Text = "  📄 " .. name
-    btn.TextColor3 = Theme.Text
-    btn.TextSize = 12
-    btn.Font = Enum.Font.Gotham
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.AutoButtonColor = true
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 4)
-    corner.Parent = btn
-    
-    btn.MouseButton1Click:Connect(callback)
-    
-    btn.Parent = parent
-    
-    return btn
-end
-
--- Create code editor
-function BladeIDE.CreateEditor(parent)
-    local editorContainer = Instance.new("Frame")
-    editorContainer.Name = "EditorContainer"
-    editorContainer.Size = UDim2.new(1, -200, 1, -140)
-    editorContainer.Position = UDim2.new(0, 200, 0, 40)
-    editorContainer.BackgroundColor3 = Theme.Editor
-    editorContainer.BorderSizePixel = 0
-    editorContainer.ClipsDescendants = true
-    editorContainer.Parent = parent
-    
-    -- Line numbers
-    local lineNumbers = Instance.new("TextLabel")
-    lineNumbers.Name = "LineNumbers"
-    lineNumbers.Size = UDim2.new(0, 50, 1, 0)
-    lineNumbers.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    lineNumbers.BorderSizePixel = 0
-    lineNumbers.Text = "1"
-    lineNumbers.TextColor3 = Theme.LineNumber
-    lineNumbers.TextSize = 14
-    lineNumbers.Font = Enum.Font.Code
-    lineNumbers.TextXAlignment = Enum.TextXAlignment.Right
-    lineNumbers.TextYAlignment = Enum.TextYAlignment.Top
-    lineNumbers.Parent = editorContainer
-    
-    -- Editor scroll frame
-    local scrollFrame = Instance.new("ScrollingFrame")
-    scrollFrame.Name = "ScrollFrame"
-    scrollFrame.Size = UDim2.new(1, -50, 1, 0)
-    scrollFrame.Position = UDim2.new(0, 50, 0, 0)
-    scrollFrame.BackgroundTransparency = 1
-    scrollFrame.BorderSizePixel = 0
-    scrollFrame.ScrollBarThickness = 8
-    scrollFrame.ScrollBarImageColor3 = Theme.Accent
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 1000)
-    scrollFrame.Parent = editorContainer
-    
-    -- Text box (actual editor)
-    local textBox = Instance.new("TextBox")
-    textBox.Name = "CodeEditor"
-    textBox.Size = UDim2.new(1, -20, 1, 0)
-    textBox.Position = UDim2.new(0, 10, 0, 0)
-    textBox.BackgroundTransparency = 1
-    textBox.Text = ""
-    textBox.TextColor3 = Theme.Text
-    textBox.TextSize = 14
-    textBox.Font = Enum.Font.Code
-    textBox.TextXAlignment = Enum.TextXAlignment.Left
-    textBox.TextYAlignment = Enum.TextYAlignment.Top
-    textBox.ClearTextOnFocus = false
-    textBox.MultiLine = true
-    textBox.TextWrapped = false
-    textBox.Parent = scrollFrame
-    
-    -- Syntax highlighting display (read-only, shows highlighted code)
-    local highlightFrame = Instance.new("Frame")
-    highlightFrame.Name = "HighlightFrame"
-    highlightFrame.Size = UDim2.new(1, -20, 1, 0)
-    highlightFrame.Position = UDim2.new(0, 10, 0, 0)
-    highlightFrame.BackgroundTransparency = 1
-    highlightFrame.ClipsDescendants = true
-    highlightFrame.Parent = scrollFrame
-    
-    -- Tab button
-    local tabFrame = Instance.new("Frame")
-    tabFrame.Name = "TabFrame"
-    tabFrame.Size = UDim2.new(1, 0, 0, 30)
-    tabFrame.Position = UDim2.new(0, 0, 0, 40)
-    tabFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    tabFrame.BorderSizePixel = 0
-    tabFrame.Parent = parent
-    
-    local tab = Instance.new("TextLabel")
-    tab.Name = "CurrentTab"
-    tab.Size = UDim2.new(0, 150, 1, 0)
-    tab.Position = UDim2.new(0, 10, 0, 0)
-    tab.BackgroundColor3 = Theme.Editor
-    tab.BorderSizePixel = 0
-    tab.Text = "  untitled.blade"
-    tab.TextColor3 = Theme.Text
-    tab.TextSize = 12
-    tab.Font = Enum.Font.Gotham
-    tab.TextXAlignment = Enum.TextXAlignment.Left
-    tab.Parent = tabFrame
-    
-    return textBox, lineNumbers, scrollFrame, highlightFrame
-end
-
--- Update line numbers
-function BladeIDE.UpdateLineNumbers(textBox, lineNumbersLabel)
-    local text = textBox.Text
-    local lines = 1
-    for _ in text:gmatch("\n") do
-        lines = lines + 1
-    end
-    
-    local lineText = ""
-    for i = 1, lines do
-        lineText = lineText .. i .. "\n"
-    end
-    
-    lineNumbersLabel.Text = lineText
-end
-
--- Simple syntax highlighter
-function BladeIDE.HighlightSyntax(code)
-    local highlighted = code
-    
-    -- Escape special HTML-like characters
-    highlighted = highlighted:gsub("&", "&amp;")
-    highlighted = highlighted:gsub("<", "&lt;")
-    highlighted = highlighted:gsub(">", "&gt;")
-    
-    -- Comments
-    highlighted = highlighted:gsub("(%-%-[^\n]*)", '<font color="#' .. Theme.Comment:ToHex() .. '">%1</font>')
-    
-    -- Strings (double quotes)
-    highlighted = highlighted:gsub('("[^"]*")', '<font color="#' .. Theme.String:ToHex() .. '">%1</font>')
-    
-    -- Strings (single quotes)
-    highlighted = highlighted:gsub("('[^']*')", '<font color="#' .. Theme.String:ToHex() .. '">%1</font>')
-    
-    -- Numbers
-    highlighted = highlighted:gsub("(%d+%.?%d*)", '<font color="#' .. Theme.Number:ToHex() .. '">%1</font>')
-    
-    -- Keywords
-    for _, keyword in ipairs(Keywords) do
-        local pattern = "%f[%a](" .. keyword .. ")%f[^%a]"
-        highlighted = highlighted:gsub(pattern, '<font color="#' .. Theme.Keyword:ToHex() .. '">%1</font>')
-    end
-    
-    -- Functions (words followed by ()
-    highlighted = highlighted:gsub("(%w+)(%s*%()", '<font color="#' .. Theme.Function:ToHex() .. '">%1</font>%2')
-    
-    return highlighted
-end
-
--- Convert Color3 to hex
-function Color3:ToHex()
-    return string.format("%02X%02X%02X", self.R * 255, self.G * 255, self.B * 255)
-end
-
--- Create highlighted label
-function BladeIDE.CreateHighlightedLabel(parent, text, position)
-    local label = Instance.new("TextLabel")
-    label.Name = "HighlightedCode"
-    label.Size = UDim2.new(1, 0, 0, 1000)
-    label.Position = position
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = Theme.Text
-    label.TextSize = 14
-    label.Font = Enum.Font.Code
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.TextYAlignment = Enum.TextYAlignment.Top
-    label.RichText = true
-    label.TextWrapped = false
-    label.Parent = parent
-    
-    return label
-end
-
--- Create console
-function BladeIDE.CreateConsole(parent)
-    local consoleContainer = Instance.new("Frame")
-    consoleContainer.Name = "ConsoleContainer"
-    consoleContainer.Size = UDim2.new(1, -200, 0, 100)
-    consoleContainer.Position = UDim2.new(0, 200, 1, -100)
-    consoleContainer.BackgroundColor3 = Theme.Console
-    consoleContainer.BorderSizePixel = 0
-    consoleContainer.Parent = parent
-    
-    -- Header
-    local header = Instance.new("Frame")
-    header.Name = "Header"
-    header.Size = UDim2.new(1, 0, 0, 25)
-    header.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    header.BorderSizePixel = 0
-    header.Parent = consoleContainer
-    
-    local headerLabel = Instance.new("TextLabel")
-    headerLabel.Name = "HeaderLabel"
-    headerLabel.Size = UDim2.new(0, 200, 1, 0)
-    headerLabel.Position = UDim2.new(0, 10, 0, 0)
-    headerLabel.BackgroundTransparency = 1
-    headerLabel.Text = "📟 Console"
-    headerLabel.TextColor3 = Theme.Text
-    headerLabel.TextSize = 12
-    headerLabel.Font = Enum.Font.GothamBold
-    headerLabel.TextXAlignment = Enum.TextXAlignment.Left
-    headerLabel.Parent = header
-    
-    -- Clear console button
-    local clearBtn = Instance.new("TextButton")
-    clearBtn.Name = "ClearConsole"
-    clearBtn.Size = UDim2.new(0, 60, 0, 20)
-    clearBtn.Position = UDim2.new(1, -70, 0.5, -10)
-    clearBtn.BackgroundColor3 = Theme.TextDim
-    clearBtn.Text = "Clear"
-    clearBtn.TextColor3 = Color3.new(1, 1, 1)
-    clearBtn.TextSize = 10
-    clearBtn.Font = Enum.Font.GothamBold
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 4)
-    corner.Parent = clearBtn
-    
-    clearBtn.Parent = header
-    
-    -- Console output
-    local scrollFrame = Instance.new("ScrollingFrame")
-    scrollFrame.Name = "ConsoleScroll"
-    scrollFrame.Size = UDim2.new(1, -10, 1, -35)
-    scrollFrame.Position = UDim2.new(0, 5, 0, 30)
-    scrollFrame.BackgroundTransparency = 1
-    scrollFrame.BorderSizePixel = 0
-    scrollFrame.ScrollBarThickness = 4
-    scrollFrame.ScrollBarImageColor3 = Theme.Accent
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 100)
-    scrollFrame.Parent = consoleContainer
-    
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Padding = UDim.new(0, 2)
-    listLayout.Parent = scrollFrame
-    
-    -- Input box
-    local inputBox = Instance.new("TextBox")
-    inputBox.Name = "ConsoleInput"
-    inputBox.Size = UDim2.new(1, -10, 0, 25)
-    inputBox.Position = UDim2.new(0, 5, 1, -30)
-    inputBox.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    inputBox.Text = ""
-    inputBox.PlaceholderText = "> Enter command..."
-    inputBox.TextColor3 = Theme.Text
-    inputBox.PlaceholderColor3 = Theme.TextDim
-    inputBox.TextSize = 12
-    inputBox.Font = Enum.Font.Code
-    inputBox.ClearTextOnFocus = false
-    
-    local corner2 = Instance.new("UICorner")
-    corner2.CornerRadius = UDim.new(0, 4)
-    corner2.Parent = inputBox
-    
-    inputBox.Parent = consoleContainer
-    
-    return scrollFrame, inputBox, clearBtn
-end
-
--- Add console message
-function BladeIDE.ConsolePrint(consoleScroll, text, messageType)
-    messageType = messageType or "normal" -- normal, error, warning, success
-    
-    local colors = {
-        normal = Theme.Text,
-        error = Theme.Error,
-        warning = Theme.Warning,
-        success = Theme.Success,
-        info = Theme.Accent
-    }
-    
-    local prefix = {
-        normal = "",
-        error = "[ERROR] ",
-        warning = "[WARN] ",
-        success = "[OK] ",
-        info = "[INFO] "
-    }
-    
-    local message = Instance.new("TextLabel")
-    message.Name = "Message"
-    message.Size = UDim2.new(1, -10, 0, 20)
-    message.BackgroundTransparency = 1
-    message.Text = prefix[messageType] .. tostring(text)
-    message.TextColor3 = colors[messageType]
-    message.TextSize = 12
-    message.Font = Enum.Font.Code
-    message.TextXAlignment = Enum.TextXAlignment.Left
-    message.TextWrapped = true
-    message.Parent = consoleScroll
-    
-    -- Adjust canvas size
-    local totalHeight = 0
-    for _, child in ipairs(consoleScroll:GetChildren()) do
-        if child:IsA("TextLabel") then
-            totalHeight = totalHeight + 22
-        end
-    end
-    
-    consoleScroll.CanvasSize = UDim2.new(0, 0, 0, totalHeight)
-    consoleScroll.CanvasPosition = Vector2.new(0, totalHeight)
-    
-    return message
-end
-
--- Code templates
-BladeIDE.Templates = {
-    ["Hello World"] = [[-- Hello World in Blade
-func main()
-    print("Hello, World!")
-    print("Welcome to Blade language!")
-end
-
-main()
-]],
-    
-    ["Fly Script"] = [[-- Fly Script in Blade
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-
-local LocalPlayer = Players.LocalPlayer
-local flyEnabled = false
-local flySpeed = 50
-
-func enableFly()
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    
-    local bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    bodyVelocity.Parent = rootPart
-    
-    flyEnabled = true
-    
-    while flyEnabled do
-        local moveDir = Vector3.new(0, 0, 0)
-        
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            moveDir = moveDir + workspace.CurrentCamera.CFrame.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            moveDir = moveDir - workspace.CurrentCamera.CFrame.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-            moveDir = moveDir + Vector3.new(0, 1, 0)
-        end
-        
-        if moveDir.Magnitude > 0 then
-            bodyVelocity.Velocity = moveDir.Unit * flySpeed
-        else
-            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-        end
-        
-        wait()
-    end
-    
-    bodyVelocity:Destroy()
-end
-
--- Press F to toggle fly
-UserInputService.InputBegan:Connect(func(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.F and not gameProcessed then
-        if flyEnabled then
-            flyEnabled = false
-        else
-            spawn(enableFly)
-        end
-    end
-end)
-
-print("Press F to fly!")
-]],
-    
-    ["ESP Script"] = [[-- ESP Script in Blade
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-
-local LocalPlayer = Players.LocalPlayer
+-- Script Variables
+local AutoRollEnabled = false
+local RollAmount = 1
+local AutoEquipBestEnabled = false
+local AutoFarmEnabled = false
+local AutoClickEnabled = false
+local KillAuraEnabled = false
+local ESPEnabled = false
+local AutoCollectDropsEnabled = false
+local WalkSpeedEnabled = false
+local JumpPowerEnabled = false
+local NoCooldownEnabled = false
+local AutoParryEnabled = false
+local GodModeEnabled = false
+local WalkSpeedValue = 50
+local JumpPowerValue = 100
+local KillAuraRange = 20
+local FarmDistance = 5
 local ESPObjects = {}
+local RolledSwords = {}
+local BestSword = nil
 
-func createESP(player)
-    if player == LocalPlayer then return end
+-- ANTI-CHEAT BYPASS FUNCTIONS
+
+-- Hook CheatDetectedEvent
+local function HookAntiCheat()
+    -- Method 1: Replace the remote event
+    local OldEvent = CheatDetectedEvent
     
-    local box = Drawing.new("Square")
-    box.Thickness = 1
-    box.Filled = false
-    box.Color = Color3.fromRGB(255, 0, 0)
+    -- Create fake event
+    local FakeEvent = {
+        FireServer = function(...) 
+            print("Anti-cheat blocked: FireServer")
+            return nil 
+        end,
+        InvokeServer = function(...) 
+            print("Anti-cheat blocked: InvokeServer") 
+            return nil 
+        end,
+        OnClientEvent = {
+            Connect = function(...) 
+                print("Anti-cheat blocked: Connect")
+                return {Disconnect = function() end}
+            end
+        }
+    }
     
-    ESPObjects[player] = box
+    -- Replace in ReplicatedStorage
+    CheatDetectedEvent = FakeEvent
+    
+    -- Method 2: Hook metatable
+    local mt = getrawmetatable(game)
+    setreadonly(mt, false)
+    OriginalNamecall = mt.__namecall
+    OriginalIndex = mt.__index
+    OriginalNewIndex = mt.__newindex
+    
+    -- Hook namecall (FireServer/InvokeServer)
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if self == OldEvent or self.Name == "CheatDetectedEvent" then
+            if method == "FireServer" or method == "InvokeServer" then
+                print("Blocked anti-cheat: " .. method)
+                return nil
+            end
+        end
+        return OriginalNamecall(self, ...)
+    end)
+    
+    -- Hook index
+    mt.__index = newcclosure(function(self, key)
+        if self == OldEvent or (typeof(self) == "Instance" and self.Name == "CheatDetectedEvent") then
+            if key == "FireServer" or key == "InvokeServer" then
+                return function() 
+                    print("Blocked anti-cheat index: " .. tostring(key))
+                    return nil 
+                end
+            end
+        end
+        return OriginalIndex(self, key)
+    end)
+    
+    setreadonly(mt, true)
+    AntiCheatBypassed = true
+    print("Anti-cheat bypassed!")
 end
 
-func updateESP()
-    for player, box in pairs(ESPObjects) do
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local pos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(
-                player.Character.HumanoidRootPart.Position
-            )
-            
-            if onScreen then
-                box.Size = Vector2.new(50, 80)
-                box.Position = Vector2.new(pos.X - 25, pos.Y - 40)
-                box.Visible = true
-            else
-                box.Visible = false
+-- Additional Anti-Cheat Bypass Methods
+local function AdditionalBypass()
+    -- Method 3: Spoof player properties
+    local OldHumanoid = nil
+    
+    game:GetService("RunService").Heartbeat:Connect(function()
+        local char = LocalPlayer.Character
+        if char then
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid ~= OldHumanoid then
+                OldHumanoid = humanoid
+                
+                -- Spoof walkspeed changes
+                local oldWs = humanoid.WalkSpeed
+                local oldJp = humanoid.JumpPower
+                
+                humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+                    if WalkSpeedEnabled and humanoid.WalkSpeed ~= WalkSpeedValue then
+                        humanoid.WalkSpeed = WalkSpeedValue
+                    end
+                end)
             end
-        else
-            box.Visible = false
+        end
+    end)
+    
+    -- Method 4: Block remote detection
+    for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+        if v:IsA("RemoteEvent") and v.Name:lower():find("cheat") or v.Name:lower():find("detect") or v.Name:lower():find("ban") then
+            local oldFireServer = v.FireServer
+            v.FireServer = function(...)
+                print("Blocked: " .. v.Name)
+                return nil
+            end
+        end
+        if v:IsA("RemoteFunction") and v.Name:lower():find("cheat") or v.Name:lower():find("detect") or v.Name:lower():find("ban") then
+            v.InvokeServer = function(...)
+                print("Blocked: " .. v.Name)
+                return nil
+            end
         end
     end
 end
 
--- Create ESP for all players
-for _, player in pairs(Players:GetPlayers()) do
-    createESP(player)
+-- Safe Value Spoofer
+local function SpoofValue(object, property, value)
+    if not object or not property then return end
+    
+    local success, err = pcall(function()
+        local oldValue = object[property]
+        
+        -- Hook the value
+        hookfunction(object[property], function()
+            return oldValue
+        end)
+        
+        -- Set new value silently
+        local success = pcall(function()
+            object[property] = value
+        end)
+        
+        if success then
+            SpoofedValues[object] = {
+                Property = property,
+                Original = oldValue,
+                Spoofed = value
+            }
+        end
+    end)
+    
+    return success
 end
 
-Players.PlayerAdded:Connect(createESP)
+-- Restore spoofed values
+local function RestoreSpoofed()
+    for object, data in pairs(SpoofedValues) do
+        pcall(function()
+            object[data.Property] = data.Original
+        end)
+    end
+end
 
-RunService.RenderStepped:Connect(updateESP)
+-- Game Folders
+local SwordsFolder = ReplicatedStorage:WaitForChild("Swords")
+local SwordToolsFolder = ReplicatedStorage:WaitForChild("SwordToolss")
+local SwordRollRequest = ReplicatedStorage:WaitForChild("SwordRollRequest")
+local SwordRollResult = ReplicatedStorage:WaitForChild("SwordRollResult")
 
-print("ESP Enabled!")
-]],
+-- Create Window
+local Window = Rayfield:CreateWindow({
+    Name = "Sword Hub (AC Bypassed)",
+    LoadingTitle = "Loading Sword Hub...",
+    LoadingSubtitle = "Anti-Cheat Bypass Active",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "SwordHubAC",
+        FileName = "Config"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "",
+        RememberJoins = true
+    },
+    KeySystem = false
+})
+
+-- Helper Functions
+local function GetAllSwords()
+    local swords = {}
+    for _, sword in pairs(SwordsFolder:GetChildren()) do
+        table.insert(swords, sword.Name)
+    end
+    return swords
+end
+
+local function GetAllSwordTools()
+    local tools = {}
+    for _, tool in pairs(SwordToolsFolder:GetChildren()) do
+        table.insert(tools, tool.Name)
+    end
+    return tools
+end
+
+local function GetCharacter()
+    return LocalPlayer.Character or LocalPlayer:WaitForChild("Character")
+end
+
+local function GetHumanoid()
+    local character = GetCharacter()
+    if character then
+        return character:FindFirstChildOfClass("Humanoid")
+    end
+    return nil
+end
+
+local function GetEquippedSword()
+    local character = GetCharacter()
+    if character then
+        for _, tool in pairs(character:GetChildren()) do
+            if tool:IsA("Tool") then
+                return tool
+            end
+        end
+    end
+    return nil
+end
+
+-- Roll Function (Safe)
+local function RollSword(amount)
+    for i = 1, amount do
+        local success, result = pcall(function()
+            -- Use spoofed call
+            return SwordRollRequest:InvokeServer()
+        end)
+        
+        if success and result then
+            table.insert(RolledSwords, result)
+            Rayfield:Notify({
+                Title = "Roll Result",
+                Content = "Rolled: " .. tostring(result),
+                Duration = 2
+            })
+        end
+        
+        wait(0.6) -- Slower to avoid detection
+    end
+end
+
+-- Equip Best Sword (Safe)
+local function EquipBestSword()
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return end
     
-    ["Auto Farm"] = [[-- Auto Farm in Blade
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+    local bestTool = nil
+    local bestDamage = 0
+    
+    for _, tool in pairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            local damage = 0
+            if tool:FindFirstChild("Damage") then
+                damage = tool.Damage.Value
+            elseif tool:FindFirstChild("Stats") and tool.Stats:FindFirstChild("Damage") then
+                damage = tool.Stats.Damage.Value
+            end
+            
+            if damage > bestDamage then
+                bestDamage = damage
+                bestTool = tool
+            end
+        end
+    end
+    
+    if bestTool then
+        local humanoid = GetHumanoid()
+        if humanoid then
+            -- Safe equip
+            pcall(function()
+                humanoid:EquipTool(bestTool)
+            end)
+            BestSword = bestTool.Name
+            Rayfield:Notify({
+                Title = "Auto Equip",
+                Content = "Equipped: " .. bestTool.Name,
+                Duration = 3
+            })
+        end
+    end
+end
 
-local LocalPlayer = Players.LocalPlayer
-local autoFarmEnabled = false
-
-func getNearestEnemy()
-    local character = LocalPlayer.Character
+-- Get Nearest Enemy
+local function GetNearestEnemy()
+    local character = GetCharacter()
     if not character then return nil end
     
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return nil end
     
-    local nearest = nil
-    local shortestDist = math.huge
+    local nearestEnemy = nil
+    local shortestDistance = KillAuraRange
     
-    for _, obj in pairs(workspace:GetChildren()) do
-        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
-            local dist = (rootPart.Position - obj.HumanoidRootPart.Position).Magnitude
-            if dist < shortestDist and dist < 50 then
-                shortestDist = dist
-                nearest = obj
-            end
-        end
-    end
-    
-    return nearest
-end
-
-func autoFarm()
-    while autoFarmEnabled do
-        local enemy = getNearestEnemy()
-        if enemy then
-            local rootPart = LocalPlayer.Character.HumanoidRootPart
-            local enemyRoot = enemy.HumanoidRootPart
+    -- Check players
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local enemyRoot = player.Character:FindFirstChild("HumanoidRootPart")
+            local enemyHumanoid = player.Character:FindFirstChildOfClass("Humanoid")
             
-            -- Teleport to enemy
-            rootPart.CFrame = enemyRoot.CFrame * CFrame.new(0, 0, 5)
-            
-            -- Attack
-            local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
-            if tool then
-                tool:Activate()
-            end
-        end
-        wait(0.1)
-    end
-end
-
--- Toggle with T
-local UserInputService = game:GetService("UserInputService")
-UserInputService.InputBegan:Connect(func(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.T and not gameProcessed then
-        autoFarmEnabled = not autoFarmEnabled
-        if autoFarmEnabled then
-            spawn(autoFarm)
-            print("Auto Farm Enabled!")
-        else
-            print("Auto Farm Disabled!")
-        end
-    end
-end)
-
-print("Press T to toggle Auto Farm")
-]],
-    
-    ["GUI Example"] = [[-- GUI Example in Blade
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-
-func createGUI()
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "BladeGUI"
-    screenGui.ResetOnSpawn = false
-    
-    if syn then
-        screenGui.Parent = game:GetService("CoreGui")
-    else
-        screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-    end
-    
-    local frame = Instance.new("Frame")
-    frame.Name = "MainFrame"
-    frame.Size = UDim2.new(0, 300, 0, 200)
-    frame.Position = UDim2.new(0.5, -150, 0.5, -100)
-    frame.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    frame.BorderSizePixel = 0
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
-    corner.Parent = frame
-    
-    frame.Parent = screenGui
-    
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 40)
-    title.BackgroundTransparency = 1
-    title.Text = "My Blade GUI"
-    title.TextColor3 = Color3.fromRGB(0, 170, 255)
-    title.TextSize = 20
-    title.Font = Enum.Font.GothamBold
-    title.Parent = frame
-    
-    local button = Instance.new("TextButton")
-    button.Size = UDim2.new(0, 200, 0, 50)
-    button.Position = UDim2.new(0.5, -100, 0.5, -10)
-    button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-    button.Text = "Click Me!"
-    button.TextColor3 = Color3.new(1, 1, 1)
-    button.TextSize = 16
-    button.Font = Enum.Font.GothamBold
-    
-    local corner2 = Instance.new("UICorner")
-    corner2.CornerRadius = UDim.new(0, 8)
-    corner2.Parent = button
-    
-    button.Parent = frame
-    
-    local clickCount = 0
-    button.MouseButton1Click:Connect(func()
-        clickCount = clickCount + 1
-        button.Text = "Clicked " .. clickCount .. " times!"
-    end)
-    
-    return screenGui
-end
-
-createGUI()
-print("GUI Created!")
-]]
-}
-
--- Load template
-function BladeIDE.LoadTemplate(name, textBox)
-    if BladeIDE.Templates[name] then
-        textBox.Text = BladeIDE.Templates[name]
-        return true
-    end
-    return false
-end
-
--- Initialize complete IDE
-function BladeIDE.Init()
-    local screenGui, mainFrame = BladeIDE.Create()
-    local topbar, runBtn, clearBtn, saveBtn, loadBtn, closeBtn = BladeIDE.CreateTopbar(mainFrame)
-    local sidebar, fileList, newFileBtn = BladeIDE.CreateSidebar(mainFrame)
-    local textBox, lineNumbers, scrollFrame, highlightFrame = BladeIDE.CreateEditor(mainFrame)
-    local consoleScroll, consoleInput, clearConsoleBtn = BladeIDE.CreateConsole(mainFrame)
-    
-    -- Current file tracking
-    local currentFile = "untitled.blade"
-    local files = {}
-    
-    -- Console print function
-    local function consolePrint(text, msgType)
-        BladeIDE.ConsolePrint(consoleScroll, text, msgType)
-    end
-    
-    -- Update line numbers on text change
-    textBox:GetPropertyChangedSignal("Text"):Connect(function()
-        BladeIDE.UpdateLineNumbers(textBox, lineNumbers)
-    end)
-    
-    -- Run button
-    runBtn.MouseButton1Click:Connect(function()
-        local code = textBox.Text
-        if #code == 0 then
-            consolePrint("No code to run!", "error")
-            return
-        end
-        
-        consolePrint("Compiling...", "info")
-        
-        local success, result = pcall(function()
-            -- Check if Blade is loaded
-            if not _G.Blade then
-                -- Load Blade if not available
-                loadstring(game:HttpGet('https://pastebin.com/raw/XXXXX'))() -- Replace with actual URL
-            end
-            
-            return _G.Blade.Execute(code, {
-                game = game,
-                workspace = workspace,
-                print = function(...) 
-                    local args = {...}
-                    local str = ""
-                    for i, v in ipairs(args) do
-                        str = str .. tostring(v) .. " "
-                    end
-                    consolePrint(str, "normal")
-                end,
-                wait = wait,
-                spawn = spawn,
-                delay = delay,
-                tick = tick,
-                time = time,
-                typeof = typeof,
-                type = type,
-                pcall = pcall,
-                xpcall = xpcall,
-                error = error,
-                assert = assert,
-                math = math,
-                table = table,
-                string = string,
-                coroutine = coroutine,
-                debug = debug,
-                os = os,
-                ipairs = ipairs,
-                pairs = pairs,
-                next = next,
-                tonumber = tonumber,
-                tostring = tostring,
-                unpack = unpack,
-                select = select,
-                rawget = rawget,
-                rawset = rawset,
-                rawequal = rawequal,
-                setmetatable = setmetatable,
-                getmetatable = getmetatable,
-                _G = _G,
-                shared = shared,
-                script = script,
-                require = require,
-                loadstring = loadstring,
-                Instance = Instance,
-                Vector3 = Vector3,
-                Vector2 = Vector2,
-                Color3 = Color3,
-                UDim = UDim,
-                UDim2 = UDim2,
-                CFrame = CFrame,
-                Enum = Enum,
-                Ray = Ray,
-                Region3 = Region3,
-                BrickColor = BrickColor,
-                NumberRange = NumberRange,
-                NumberSequence = NumberSequence,
-                ColorSequence = ColorSequence
-            })
-        end)
-        
-        if success then
-            consolePrint("Script executed successfully!", "success")
-        else
-            consolePrint("Error: " .. tostring(result), "error")
-        end
-    end)
-    
-    -- Clear button
-    clearBtn.MouseButton1Click:Connect(function()
-        textBox.Text = ""
-        consolePrint("Editor cleared", "info")
-    end)
-    
-    -- Save button
-    saveBtn.MouseButton1Click:Connect(function()
-        local code = textBox.Text
-        if #code == 0 then
-            consolePrint("Nothing to save!", "warning")
-            return
-        end
-        
-        files[currentFile] = code
-        
-        -- Save to file (using writefile if available)
-        if writefile then
-            local success, err = pcall(function()
-                writefile(currentFile, code)
-            end)
-            if success then
-                consolePrint("Saved to " .. currentFile, "success")
-            else
-                consolePrint("Save error: " .. tostring(err), "error")
-            end
-        else
-            consolePrint("Saved to memory (writefile not available)", "success")
-        end
-    end)
-    
-    -- Load button
-    loadBtn.MouseButton1Click:Connect(function()
-        if readfile then
-            local success, content = pcall(function()
-                return readfile(currentFile)
-            end)
-            if success and content then
-                textBox.Text = content
-                consolePrint("Loaded " .. currentFile, "success")
-            else
-                consolePrint("Load error or file not found", "error")
-            end
-        else
-            if files[currentFile] then
-                textBox.Text = files[currentFile]
-                consolePrint("Loaded from memory", "success")
-            else
-                consolePrint("No file in memory", "error")
-            end
-        end
-    end)
-    
-    -- Close button
-    closeBtn.MouseButton1Click:Connect(function()
-        mainFrame:TweenSize(UDim2.new(0, 0, 0, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.3, true, function()
-            screenGui:Destroy()
-        end)
-    end)
-    
-    -- New file button
-    newFileBtn.MouseButton1Click:Connect(function()
-        currentFile = "script" .. (#files + 1) .. ".blade"
-        textBox.Text = ""
-        consolePrint("Created new file: " .. currentFile, "info")
-    end)
-    
-    -- Clear console button
-    clearConsoleBtn.MouseButton1Click:Connect(function()
-        for _, child in ipairs(consoleScroll:GetChildren()) do
-            if child:IsA("TextLabel") then
-                child:Destroy()
-            end
-        end
-        consoleScroll.CanvasSize = UDim2.new(0, 0, 0, 100)
-    end)
-    
-    -- Console input
-    consoleInput.FocusLost:Connect(function(enterPressed)
-        if enterPressed then
-            local cmd = consoleInput.Text
-            consolePrint("> " .. cmd, "info")
-            
-            -- Execute command
-            local success, result = pcall(function()
-                return loadstring(cmd)()
-            end)
-            
-            if success then
-                if result then
-                    consolePrint(tostring(result), "normal")
+            if enemyRoot and enemyHumanoid and enemyHumanoid.Health > 0 then
+                local distance = (rootPart.Position - enemyRoot.Position).Magnitude
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    nearestEnemy = player.Character
                 end
-            else
-                consolePrint(tostring(result), "error")
             end
-            
-            consoleInput.Text = ""
         end
-    end)
-    
-    -- Create template buttons
-    for templateName, _ in pairs(BladeIDE.Templates) do
-        BladeIDE.CreateFileButton(templateName, fileList, function()
-            BladeIDE.LoadTemplate(templateName, textBox)
-            consolePrint("Loaded template: " .. templateName, "info")
-        end)
     end
     
-    -- Make draggable
-    local dragging = false
-    local dragStart = nil
-    local startPos = nil
-    
-    topbar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainFrame.Position
+    -- Check NPCs
+    for _, npc in pairs(Workspace:GetDescendants()) do
+        if npc:IsA("Model") and npc:FindFirstChildOfClass("Humanoid") and npc ~= character then
+            local npcRoot = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso")
+            local npcHumanoid = npc:FindFirstChildOfClass("Humanoid")
+            
+            if npcRoot and npcHumanoid and npcHumanoid.Health > 0 then
+                local isPlayer = false
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player.Character == npc then
+                        isPlayer = true
+                        break
+                    end
+                end
+                
+                if not isPlayer then
+                    local distance = (rootPart.Position - npcRoot.Position).Magnitude
+                    if distance < shortestDistance then
+                        shortestDistance = distance
+                        nearestEnemy = npc
+                    end
+                end
+            end
         end
-    end)
+    end
     
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-    
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-    
-    -- Welcome message
-    consolePrint("Blade IDE v" .. BladeIDE.Version .. " loaded!", "success")
-    consolePrint("Select a template from the sidebar or start coding!", "info")
-    
-    return BladeIDE
+    return nearestEnemy
 end
 
--- Auto-init
-BladeIDE.Init()
-
--- ============================================
--- BLADE IDE - QUICK LOAD
--- Just execute this to load the full IDE
--- ============================================
-
--- This would be hosted on a paste service
-local IDE_URL = "https://pastebin.com/raw/XXXXX" -- Replace with actual URL
-
--- Load and execute
-local success, result = pcall(function()
-    local code = game:HttpGet(IDE_URL)
-    return loadstring(code)()
+-- Safe Auto Roll Loop
+spawn(function()
+    while true do
+        if AutoRollEnabled then
+            -- Check if bypass active
+            if AntiCheatBypassed then
+                RollSword(RollAmount)
+            end
+        end
+        wait(1.5) -- Longer wait to be safe
+    end
 end)
 
-if success then
-    print("Blade IDE loaded successfully!")
-else
-    print("Failed to load Blade IDE:", result)
+-- Safe Auto Equip Loop
+spawn(function()
+    while true do
+        if AutoEquipBestEnabled and AntiCheatBypassed then
+            EquipBestSword()
+        end
+        wait(8) -- Very slow to avoid detection
+    end
+end)
+
+-- Safe Auto Click Loop
+spawn(function()
+    while true do
+        if AutoClickEnabled and AntiCheatBypassed then
+            local sword = GetEquippedSword()
+            if sword then
+                -- Safe activate
+                pcall(function()
+                    sword:Activate()
+                end)
+            end
+            wait(0.15) -- Slower clicks
+        else
+            wait(0.5)
+        end
+    end
+end)
+
+-- Safe Kill Aura Loop
+spawn(function()
+    while true do
+        if KillAuraEnabled and AntiCheatBypassed then
+            local enemy = GetNearestEnemy()
+            if enemy then
+                local sword = GetEquippedSword()
+                if sword then
+                    local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Torso")
+                    if enemyRoot then
+                        local character = GetCharacter()
+                        local rootPart = character:FindFirstChild("HumanoidRootPart")
+                        if rootPart then
+                            -- Smooth look
+                            local targetCFrame = CFrame.new(rootPart.Position, Vector3.new(enemyRoot.Position.X, rootPart.Position.Y, enemyRoot.Position.Z))
+                            rootPart.CFrame = rootPart.CFrame:Lerp(targetCFrame, 0.1)
+                            
+                            -- Safe attack
+                            pcall(function()
+                                sword:Activate()
+                            end)
+                        end
+                    end
+                end
+            end
+            wait(0.2) -- Slower attacks
+        else
+            wait(0.5)
+        end
+    end
+end)
+
+-- Safe Auto Farm Loop
+spawn(function()
+    while true do
+        if AutoFarmEnabled and AntiCheatBypassed then
+            local enemy = GetNearestEnemy()
+            if enemy then
+                local character = GetCharacter()
+                local rootPart = character:FindFirstChild("HumanoidRootPart")
+                local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Torso")
+                local enemyHumanoid = enemy:FindFirstChildOfClass("Humanoid")
+                
+                if rootPart and enemyRoot and enemyHumanoid and enemyHumanoid.Health > 0 then
+                    -- Smooth teleport
+                    local targetPos = enemyRoot.Position - (enemyRoot.CFrame.LookVector * FarmDistance)
+                    local newCFrame = CFrame.new(targetPos, enemyRoot.Position)
+                    rootPart.CFrame = rootPart.CFrame:Lerp(newCFrame, 0.3)
+                    
+                    -- Safe attack
+                    local sword = GetEquippedSword()
+                    if sword then
+                        pcall(function()
+                            sword:Activate()
+                        end)
+                    end
+                end
+            end
+            wait(0.2)
+        else
+            wait(0.5)
+        end
+    end
+end)
+
+-- Safe Auto Collect Loop
+spawn(function()
+    while true do
+        if AutoCollectDropsEnabled and AntiCheatBypassed then
+            local character = GetCharacter()
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            
+            if rootPart then
+                for _, drop in pairs(Workspace:GetDescendants()) do
+                    if drop:IsA("BasePart") and (drop.Name:find("Drop") or drop.Name:find("Coin") or drop.Name:find("Gem")) then
+                        local distance = (rootPart.Position - drop.Position).Magnitude
+                        if distance < 30 then
+                            -- Smooth tween
+                            local tween = TweenService:Create(rootPart, TweenInfo.new(0.3), {CFrame = drop.CFrame})
+                            tween:Play()
+                            wait(0.3)
+                        end
+                    end
+                end
+            end
+            wait(0.8)
+        else
+            wait(1)
+        end
+    end
+end)
+
+-- Safe WalkSpeed/JumpPower Loop
+spawn(function()
+    while true do
+        if AntiCheatBypassed then
+            local humanoid = GetHumanoid()
+            if humanoid then
+                if WalkSpeedEnabled then
+                    -- Spoof the value
+                    pcall(function()
+                        humanoid.WalkSpeed = WalkSpeedValue
+                    end)
+                end
+                if JumpPowerEnabled then
+                    pcall(function()
+                        humanoid.JumpPower = JumpPowerValue
+                    end)
+                end
+            end
+        end
+        wait(0.2)
+    end
+end)
+
+-- Safe No Cooldown Loop
+spawn(function()
+    while true do
+        if NoCooldownEnabled and AntiCheatBypassed then
+            local character = GetCharacter()
+            if character then
+                for _, obj in pairs(character:GetDescendants()) do
+                    if obj:IsA("BoolValue") and obj.Name:find("Cooldown") then
+                        pcall(function()
+                            obj.Value = false
+                        end)
+                    end
+                    if obj:IsA("NumberValue") and obj.Name:find("Cooldown") then
+                        pcall(function()
+                            obj.Value = 0
+                        end)
+                    end
+                end
+            end
+            
+            local sword = GetEquippedSword()
+            if sword then
+                for _, obj in pairs(sword:GetDescendants()) do
+                    if obj:IsA("BoolValue") and obj.Name:find("Cooldown") then
+                        pcall(function()
+                            obj.Value = false
+                        end)
+                    end
+                    if obj:IsA("NumberValue") and obj.Name:find("Cooldown") then
+                        pcall(function()
+                            obj.Value = 0
+                        end)
+                    end
+                end
+            end
+        end
+        wait(0.3)
+    end
+end)
+
+-- Safe Auto Parry Loop
+spawn(function()
+    while true do
+        if AutoParryEnabled and AntiCheatBypassed then
+            local enemy = GetNearestEnemy()
+            if enemy then
+                local sword = enemy:FindFirstChildOfClass("Tool")
+                if sword then
+                    -- Safe parry
+                    pcall(function()
+                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+                    end)
+                    wait(0.5)
+                    pcall(function()
+                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+                    end)
+                end
+            end
+        end
+        wait(0.3)
+    end
+end)
+
+-- Safe God Mode Loop
+spawn(function()
+    while true do
+        if GodModeEnabled and AntiCheatBypassed then
+            local humanoid = GetHumanoid()
+            if humanoid then
+                pcall(function()
+                    humanoid.MaxHealth = math.huge
+                    humanoid.Health = math.huge
+                end)
+            end
+        end
+        wait(1)
+    end
+end)
+
+-- ESP Functions
+local function CreateESP(object, text, color)
+    if ESPObjects[object] then return end
+    
+    local esp = {
+        Box = Drawing.new("Square"),
+        Text = Drawing.new("Text"),
+        Tracer = Drawing.new("Line")
+    }
+    
+    esp.Box.Thickness = 1
+    esp.Box.Filled = false
+    esp.Box.Color = color or Color3.fromRGB(255, 0, 0)
+    esp.Box.Transparency = 1
+    
+    esp.Text.Size = 14
+    esp.Text.Center = true
+    esp.Text.Outline = true
+    esp.Text.Color = color or Color3.fromRGB(255, 255, 255)
+    
+    esp.Tracer.Thickness = 1
+    esp.Tracer.Color = color or Color3.fromRGB(255, 255, 255)
+    
+    ESPObjects[object] = esp
 end
 
--- OR load the chunks above directly
--- Copy chunks 1-8 in order to use the full IDE
+local function UpdateESP()
+    for object, esp in pairs(ESPObjects) do
+        local isVisible = false
+        
+        if ESPEnabled and object and object.Parent then
+            local pos, onScreen = Camera:WorldToViewportPoint(object.Position)
+            if onScreen then
+                isVisible = true
+                esp.Box.Visible = true
+                esp.Text.Visible = true
+                esp.Tracer.Visible = true
+                
+                local size = Vector2.new(50, 50)
+                esp.Box.Size = size
+                esp.Box.Position = Vector2.new(pos.X - size.X/2, pos.Y - size.Y/2)
+                
+                esp.Text.Position = Vector2.new(pos.X, pos.Y - size.Y/2 - 15)
+                esp.Text.Text = object.Name
+                
+                esp.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+                esp.Tracer.To = Vector2.new(pos.X, pos.Y)
+            end
+        end
+        
+        if not isVisible then
+            esp.Box.Visible = false
+            esp.Text.Visible = false
+            esp.Tracer.Visible = false
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(UpdateESP)
+
+-- ESP Setup
+spawn(function()
+    while true do
+        if ESPEnabled and AntiCheatBypassed then
+            for _, drop in pairs(Workspace:GetDescendants()) do
+                if drop:IsA("BasePart") and (drop.Name:find("Drop") or drop.Name:find("Coin") or drop.Name:find("Gem") or drop.Name:find("Sword")) then
+                    CreateESP(drop, drop.Name, Color3.fromRGB(255, 215, 0))
+                end
+            end
+        end
+        wait(3)
+    end
+end)
+
+-- ANTI-CHEAT TAB
+local AntiCheatTab = Window:CreateTab("Anti-Cheat", 4483362458)
+
+AntiCheatTab:CreateSection("Bypass Controls")
+
+AntiCheatTab:CreateButton({
+    Name = "Enable Anti-Cheat Bypass",
+    Callback = function()
+        HookAntiCheat()
+        AdditionalBypass()
+        Rayfield:Notify({
+            Title = "Anti-Cheat",
+            Content = "Bypass Enabled! You can now use features safely.",
+            Duration = 5
+        })
+    end
+})
+
+AntiCheatTab:CreateLabel("Status: " .. (AntiCheatBypassed and "Bypassed" or "Not Bypassed"))
+
+AntiCheatTab:CreateParagraph({
+    Title = "How it works",
+    Content = "This bypass hooks the CheatDetectedEvent and blocks all detection methods. Enable this before using any other features."
+})
+
+AntiCheatTab:CreateButton({
+    Name = "Test Bypass",
+    Callback = function()
+        -- Test fire the anti-cheat event
+        local success = pcall(function()
+            CheatDetectedEvent:FireServer("test")
+        end)
+        if not success then
+            Rayfield:Notify({
+                Title = "Bypass Test",
+                Content = "Bypass is working! Event blocked.",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- ROLLING TAB
+local RollingTab = Window:CreateTab("Rolling", 4483362458)
+
+RollingTab:CreateSection("Sword Rolling")
+
+RollingTab:CreateToggle({
+    Name = "Auto Roll",
+    CurrentValue = false,
+    Flag = "AutoRollToggle",
+    Callback = function(Value)
+        AutoRollEnabled = Value
+        Rayfield:Notify({
+            Title = "Auto Roll",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+RollingTab:CreateSlider({
+    Name = "Roll Amount",
+    Range = {1, 5},
+    Increment = 1,
+    Suffix = " rolls",
+    CurrentValue = 1,
+    Flag = "RollAmountSlider",
+    Callback = function(Value)
+        RollAmount = Value
+    end
+})
+
+RollingTab:CreateButton({
+    Name = "Roll Once",
+    Callback = function()
+        if AntiCheatBypassed then
+            RollSword(1)
+        else
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Enable Anti-Cheat Bypass first!",
+                Duration = 3
+            })
+        end
+    end
+})
+
+RollingTab:CreateButton({
+    Name = "Roll x5",
+    Callback = function()
+        if AntiCheatBypassed then
+            RollSword(5)
+        else
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Enable Anti-Cheat Bypass first!",
+                Duration = 3
+            })
+        end
+    end
+})
+
+RollingTab:CreateToggle({
+    Name = "Auto Equip Best Sword",
+    CurrentValue = false,
+    Flag = "AutoEquipBestToggle",
+    Callback = function(Value)
+        AutoEquipBestEnabled = Value
+        Rayfield:Notify({
+            Title = "Auto Equip",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+-- COMBAT TAB
+local CombatTab = Window:CreateTab("Combat", 4483362458)
+
+CombatTab:CreateSection("Auto Combat")
+
+CombatTab:CreateToggle({
+    Name = "Kill Aura",
+    CurrentValue = false,
+    Flag = "KillAuraToggle",
+    Callback = function(Value)
+        KillAuraEnabled = Value
+        Rayfield:Notify({
+            Title = "Kill Aura",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+CombatTab:CreateSlider({
+    Name = "Kill Aura Range",
+    Range = {5, 30},
+    Increment = 5,
+    Suffix = " studs",
+    CurrentValue = 15,
+    Flag = "KillAuraRangeSlider",
+    Callback = function(Value)
+        KillAuraRange = Value
+    end
+})
+
+CombatTab:CreateToggle({
+    Name = "Auto Click",
+    CurrentValue = false,
+    Flag = "AutoClickToggle",
+    Callback = function(Value)
+        AutoClickEnabled = Value
+        Rayfield:Notify({
+            Title = "Auto Click",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+CombatTab:CreateToggle({
+    Name = "Auto Parry",
+    CurrentValue = false,
+    Flag = "AutoParryToggle",
+    Callback = function(Value)
+        AutoParryEnabled = Value
+        Rayfield:Notify({
+            Title = "Auto Parry",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+CombatTab:CreateToggle({
+    Name = "No Cooldown",
+    CurrentValue = false,
+    Flag = "NoCooldownToggle",
+    Callback = function(Value)
+        NoCooldownEnabled = Value
+        Rayfield:Notify({
+            Title = "No Cooldown",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+-- FARMING TAB
+local FarmingTab = Window:CreateTab("Farming", 4483362458)
+
+FarmingTab:CreateSection("Auto Farming")
+
+FarmingTab:CreateToggle({
+    Name = "Auto Farm",
+    CurrentValue = false,
+    Flag = "AutoFarmToggle",
+    Callback = function(Value)
+        AutoFarmEnabled = Value
+        Rayfield:Notify({
+            Title = "Auto Farm",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+FarmingTab:CreateSlider({
+    Name = "Farm Distance",
+    Range = {3, 10},
+    Increment = 1,
+    Suffix = " studs",
+    CurrentValue = 5,
+    Flag = "FarmDistanceSlider",
+    Callback = function(Value)
+        FarmDistance = Value
+    end
+})
+
+FarmingTab:CreateToggle({
+    Name = "Auto Collect Drops",
+    CurrentValue = false,
+    Flag = "AutoCollectDropsToggle",
+    Callback = function(Value)
+        AutoCollectDropsEnabled = Value
+        Rayfield:Notify({
+            Title = "Auto Collect",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+FarmingTab:CreateToggle({
+    Name = "ESP (Drops & Enemies)",
+    CurrentValue = false,
+    Flag = "ESPToggle",
+    Callback = function(Value)
+        ESPEnabled = Value
+        Rayfield:Notify({
+            Title = "ESP",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+-- PLAYER TAB
+local PlayerTab = Window:CreateTab("Player", 4483362458)
+
+PlayerTab:CreateSection("Character Mods")
+
+PlayerTab:CreateToggle({
+    Name = "WalkSpeed",
+    CurrentValue = false,
+    Flag = "WalkSpeedToggle",
+    Callback = function(Value)
+        WalkSpeedEnabled = Value
+        Rayfield:Notify({
+            Title = "WalkSpeed",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+PlayerTab:CreateSlider({
+    Name = "WalkSpeed Value",
+    Range = {16, 150},
+    Increment = 5,
+    Suffix = " speed",
+    CurrentValue = 50,
+    Flag = "WalkSpeedSlider",
+    Callback = function(Value)
+        WalkSpeedValue = Value
+    end
+})
+
+PlayerTab:CreateToggle({
+    Name = "JumpPower",
+    CurrentValue = false,
+    Flag = "JumpPowerToggle",
+    Callback = function(Value)
+        JumpPowerEnabled = Value
+        Rayfield:Notify({
+            Title = "JumpPower",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+PlayerTab:CreateSlider({
+    Name = "JumpPower Value",
+    Range = {50, 150},
+    Increment = 10,
+    Suffix = " power",
+    CurrentValue = 100,
+    Flag = "JumpPowerSlider",
+    Callback = function(Value)
+        JumpPowerValue = Value
+    end
+})
+
+PlayerTab:CreateToggle({
+    Name = "God Mode",
+    CurrentValue = false,
+    Flag = "GodModeToggle",
+    Callback = function(Value)
+        GodModeEnabled = Value
+        Rayfield:Notify({
+            Title = "God Mode",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+-- SETTINGS TAB
+local SettingsTab = Window:CreateTab("Settings", 4483362458)
+
+SettingsTab:CreateSection("Configuration")
+
+SettingsTab:CreateButton({
+    Name = "Save Config",
+    Callback = function()
+        Rayfield:SaveConfiguration()
+        Rayfield:Notify({
+            Title = "Settings",
+            Content = "Configuration Saved!",
+            Duration = 2
+        })
+    end
+})
+
+SettingsTab:CreateButton({
+    Name = "Destroy UI",
+    Callback = function()
+        for _, esp in pairs(ESPObjects) do
+            for _, drawing in pairs(esp) do
+                drawing:Remove()
+            end
+        end
+        RestoreSpoofed()
+        Rayfield:Destroy()
+    end
+})
+
+SettingsTab:CreateParagraph({
+    Title = "Credits",
+    Content = "Sword Hub with Anti-Cheat Bypass"
+})
+
+-- Load Configuration
+Rayfield:LoadConfiguration()
+
+-- Welcome Notification
+Rayfield:Notify({
+    Title = "Sword Hub Loaded",
+    Content = "IMPORTANT: Enable Anti-Cheat Bypass first in the Anti-Cheat tab!",
+    Duration = 6
+})
