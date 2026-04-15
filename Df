@@ -1,877 +1,437 @@
--- Load Rayfield UI Library
-local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/SiriusSoftwareLtd/Rayfield/main/source.lua'))()
+-- ============================================
+-- FLY SCRIPT IN BLADE LANGUAGE
+-- With Mobile Support
+-- ============================================
 
--- Services
+local flyScript = [[
+-- Fly System with Mobile Support
+-- Written in Blade Language
+
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local Camera = Workspace.CurrentCamera
+local Workspace = game:GetService("Workspace")
+local ContextActionService = game:GetService("ContextActionService")
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
+local Camera = Workspace.CurrentCamera
 
--- Remote Events/Folders (Based on user's game structure)
-local SwordsFolder = ReplicatedStorage:WaitForChild("Swords")
-local SwordToolsFolder = ReplicatedStorage:WaitForChild("SwordToolss")
-local SwordRollRequest = ReplicatedStorage:WaitForChild("SwordRollRequest")
-local SwordRollResult = ReplicatedStorage:WaitForChild("SwordRollResult")
+-- Fly Settings
+local flySpeed = 50
+local flyEnabled = false
+local mobileFlyEnabled = false
+local verticalSpeed = 30
 
--- Create Window
-local Window = Rayfield:CreateWindow({
-    Name = "⚔️ Sword Hub",
-    LoadingTitle = "Loading Sword Hub...",
-    LoadingSubtitle = "Ultimate Sword Game Script",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "SwordHub",
-        FileName = "Config"
-    },
-    Discord = {
-        Enabled = false,
-        Invite = "",
-        RememberJoins = true
-    },
-    KeySystem = false
-})
+-- Movement vectors
+local moveVector = Vector3.new(0, 0, 0)
+local flyConnection = nil
+local bodyVelocity = nil
+local bodyGyro = nil
 
--- ==================== VARIABLES ====================
-local AutoRollEnabled = false
-local RollAmount = 1
-local AutoEquipBestEnabled = false
-local AutoFarmEnabled = false
-local AutoClickEnabled = false
-local AutoBlockEnabled = false
-local KillAuraEnabled = false
-local ESPEnabled = false
-local AutoCollectDropsEnabled = false
-local WalkSpeedEnabled = false
-local JumpPowerEnabled = false
-local NoCooldownEnabled = false
-local AutoParryEnabled = false
-local GodModeEnabled = false
+-- Mobile GUI
+local mobileGui = nil
+local flyButton = nil
+local upButton = nil
+local downButton = nil
 
-local WalkSpeedValue = 50
-local JumpPowerValue = 100
-local KillAuraRange = 20
-local FarmDistance = 5
-
-local ESPObjects = {}
-local RolledSwords = {}
-local BestSword = nil
-
--- ==================== FUNCTIONS ====================
-
--- Get all swords from folder
-local function GetAllSwords()
-    local swords = {}
-    for _, sword in pairs(SwordsFolder:GetChildren()) do
-        table.insert(swords, sword.Name)
-    end
-    return swords
-end
-
--- Get all sword tools
-local function GetAllSwordTools()
-    local tools = {}
-    for _, tool in pairs(SwordToolsFolder:GetChildren()) do
-        table.insert(tools, tool.Name)
-    end
-    return tools
-end
-
--- Roll for swords
-local function RollSword(amount)
-    for i = 1, amount do
-        local success, result = pcall(function()
-            return SwordRollRequest:InvokeServer()
-        end)
-        
-        if success and result then
-            table.insert(RolledSwords, result)
-            Rayfield:Notify({
-                Title = "🎲 Roll Result",
-                Content = "Rolled: " .. tostring(result),
-                Duration = 2
-            })
-        end
-        
-        wait(0.5) -- Prevent spam detection
-    end
-end
-
--- Auto Roll Loop
-spawn(function()
-    while true do
-        if AutoRollEnabled then
-            RollSword(RollAmount)
-        end
-        wait(1)
-    end
-end)
-
--- Get Character
-local function GetCharacter()
-    return LocalPlayer.Character or LocalPlayer:WaitForChild("Character")
-end
-
--- Get Humanoid
-local function GetHumanoid()
-    local character = GetCharacter()
-    if character then
-        return character:FindFirstChildOfClass("Humanoid")
-    end
-    return nil
-end
-
--- Get equipped sword
-local function GetEquippedSword()
-    local character = GetCharacter()
-    if character then
-        for _, tool in pairs(character:GetChildren()) do
-            if tool:IsA("Tool") and (tool:FindFirstChild("SwordScript") or tool.Name:find("Sword")) then
-                return tool
-            end
-        end
-    end
-    return nil
-end
-
--- Equip best sword
-local function EquipBestSword()
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not backpack then return end
+func createMobileGUI()
+    -- Create ScreenGui
+    mobileGui = Instance.new("ScreenGui")
+    mobileGui.Name = "FlyMobileGUI"
+    mobileGui.ResetOnSpawn = false
+    mobileGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     
-    local bestTool = nil
-    local bestDamage = 0
+    -- Main Fly Button
+    flyButton = Instance.new("TextButton")
+    flyButton.Name = "FlyButton"
+    flyButton.Size = UDim2.new(0, 80, 0, 80)
+    flyButton.Position = UDim2.new(1, -100, 1, -180)
+    flyButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    flyButton.Text = "FLY"
+    flyButton.TextColor3 = Color3.new(1, 1, 1)
+    flyButton.TextSize = 20
+    flyButton.Font = Enum.Font.GothamBold
+    flyButton.BorderSizePixel = 0
+    flyButton.Parent = mobileGui
     
-    for _, tool in pairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") then
-            -- Check for damage value
-            local damage = 0
-            if tool:FindFirstChild("Damage") then
-                damage = tool.Damage.Value
-            elseif tool:FindFirstChild("Stats") and tool.Stats:FindFirstChild("Damage") then
-                damage = tool.Stats.Damage.Value
-            end
-            
-            -- Check config module
-            local config = tool:FindFirstChild("Configuration") or tool:FindFirstChild("Settings")
-            if config and config:FindFirstChild("Damage") then
-                damage = config.Damage.Value
-            end
-            
-            if damage > bestDamage then
-                bestDamage = damage
-                bestTool = tool
-            end
-        end
+    -- Corner radius
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 20)
+    corner.Parent = flyButton
+    
+    -- Up Button
+    upButton = Instance.new("TextButton")
+    upButton.Name = "UpButton"
+    upButton.Size = UDim2.new(0, 60, 0, 60)
+    upButton.Position = UDim2.new(1, -170, 1, -120)
+    upButton.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    upButton.Text = "UP"
+    upButton.TextColor3 = Color3.new(0, 0, 0)
+    upButton.TextSize = 16
+    upButton.Font = Enum.Font.GothamBold
+    upButton.Visible = false
+    upButton.Parent = mobileGui
+    
+    local corner2 = Instance.new("UICorner")
+    corner2.CornerRadius = UDim.new(0, 15)
+    corner2.Parent = upButton
+    
+    -- Down Button
+    downButton = Instance.new("TextButton")
+    downButton.Name = "DownButton"
+    downButton.Size = UDim2.new(0, 60, 0, 60)
+    downButton.Position = UDim2.new(1, -90, 1, -120)
+    downButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+    downButton.Text = "DOWN"
+    downButton.TextColor3 = Color3.new(0, 0, 0)
+    downButton.TextSize = 14
+    downButton.Font = Enum.Font.GothamBold
+    downButton.Visible = false
+    downButton.Parent = mobileGui
+    
+    local corner3 = Instance.new("UICorner")
+    corner3.CornerRadius = UDim.new(0, 15)
+    corner3.Parent = downButton
+    
+    -- Speed Slider
+    local speedFrame = Instance.new("Frame")
+    speedFrame.Name = "SpeedFrame"
+    speedFrame.Size = UDim2.new(0, 200, 0, 40)
+    speedFrame.Position = UDim2.new(0.5, -100, 1, -60)
+    speedFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    speedFrame.BorderSizePixel = 0
+    speedFrame.Visible = false
+    speedFrame.Parent = mobileGui
+    
+    local corner4 = Instance.new("UICorner")
+    corner4.CornerRadius = UDim.new(0, 10)
+    corner4.Parent = speedFrame
+    
+    local speedLabel = Instance.new("TextLabel")
+    speedLabel.Name = "SpeedLabel"
+    speedLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    speedLabel.BackgroundTransparency = 1
+    speedLabel.Text = "Speed: 50"
+    speedLabel.TextColor3 = Color3.new(1, 1, 1)
+    speedLabel.TextSize = 14
+    speedLabel.Font = Enum.Font.Gotham
+    speedLabel.Parent = speedFrame
+    
+    local speedSlider = Instance.new("TextButton")
+    speedSlider.Name = "SpeedSlider"
+    speedSlider.Size = UDim2.new(0.9, 0, 0.3, 0)
+    speedSlider.Position = UDim2.new(0.05, 0, 0.6, 0)
+    speedSlider.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    speedSlider.Text = ""
+    speedSlider.Parent = speedFrame
+    
+    local corner5 = Instance.new("UICorner")
+    corner5.CornerRadius = UDim.new(0, 5)
+    corner5.Parent = speedSlider
+    
+    -- Parent to CoreGui or PlayerGui
+    if syn then
+        mobileGui.Parent = game:GetService("CoreGui")
+    else
+        mobileGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
     
-    if bestTool then
-        local humanoid = GetHumanoid()
-        if humanoid then
-            humanoid:EquipTool(bestTool)
-            BestSword = bestTool.Name
-            Rayfield:Notify({
-                Title = "⚔️ Auto Equip",
-                Content = "Equipped: " .. bestTool.Name .. " (DMG: " .. bestDamage .. ")",
-                Duration = 3
-            })
-        end
-    end
+    return mobileGui
 end
 
--- Auto Equip Loop
-spawn(function()
-    while true do
-        if AutoEquipBestEnabled then
-            EquipBestSword()
-        end
-        wait(5)
-    end
-end)
-
--- Auto Click
-spawn(function()
-    while true do
-        if AutoClickEnabled then
-            local sword = GetEquippedSword()
-            if sword then
-                sword:Activate()
-            end
-            wait(0.1)
-        else
-            wait(0.5)
-        end
-    end
-end)
-
--- Find nearest enemy
-local function GetNearestEnemy()
-    local character = GetCharacter()
-    if not character then return nil end
+func enableFly()
+    local character = LocalPlayer.Character
+    if not character then return end
     
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
     local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return nil end
     
-    local nearestEnemy = nil
-    local shortestDistance = KillAuraRange
+    if not humanoid or not rootPart then return end
     
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local enemyRoot = player.Character:FindFirstChild("HumanoidRootPart")
-            local enemyHumanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            
-            if enemyRoot and enemyHumanoid and enemyHumanoid.Health > 0 then
-                local distance = (rootPart.Position - enemyRoot.Position).Magnitude
-                if distance < shortestDistance then
-                    shortestDistance = distance
-                    nearestEnemy = player.Character
-                end
-            end
+    -- Create BodyVelocity for movement
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    bodyVelocity.Parent = rootPart
+    
+    -- Create BodyGyro for rotation
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bodyGyro.P = 10000
+    bodyGyro.Parent = rootPart
+    
+    -- Disable gravity
+    humanoid.PlatformStand = true
+    
+    -- Fly loop
+    flyConnection = RunService.RenderStepped:Connect(func()
+        if not flyEnabled then return end
+        
+        local moveDir = Vector3.new(0, 0, 0)
+        
+        -- Keyboard input (PC)
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            moveDir = moveDir + Camera.CFrame.LookVector
         end
-    end
-    
-    -- Check for NPCs
-    for _, npc in pairs(Workspace:GetDescendants()) do
-        if npc:IsA("Model") and npc:FindFirstChildOfClass("Humanoid") and npc ~= character then
-            local npcRoot = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso")
-            local npcHumanoid = npc:FindFirstChildOfClass("Humanoid")
-            
-            if npcRoot and npcHumanoid and npcHumanoid.Health > 0 then
-                -- Check if it's an enemy NPC (not a player)
-                local isPlayer = false
-                for _, player in pairs(Players:GetPlayers()) do
-                    if player.Character == npc then
-                        isPlayer = true
-                        break
-                    end
-                end
-                
-                if not isPlayer then
-                    local distance = (rootPart.Position - npcRoot.Position).Magnitude
-                    if distance < shortestDistance then
-                        shortestDistance = distance
-                        nearestEnemy = npc
-                    end
-                end
-            end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            moveDir = moveDir - Camera.CFrame.LookVector
         end
-    end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            moveDir = moveDir - Camera.CFrame.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            moveDir = moveDir + Camera.CFrame.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            moveDir = moveDir + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+            moveDir = moveDir - Vector3.new(0, 1, 0)
+        end
+        
+        -- Mobile input
+        if mobileFlyEnabled then
+            -- Use thumbstick or touch
+            local touchMove = moveVector
+            moveDir = moveDir + (Camera.CFrame.LookVector * touchMove.Z + Camera.CFrame.RightVector * touchMove.X)
+        end
+        
+        -- Normalize and apply speed
+        if moveDir.Magnitude > 0 then
+            moveDir = moveDir.Unit * flySpeed
+        end
+        
+        -- Update velocity
+        if bodyVelocity then
+            bodyVelocity.Velocity = moveDir
+        end
+        
+        -- Update gyro to match camera
+        if bodyGyro then
+            bodyGyro.CFrame = Camera.CFrame
+        end
+    end)
     
-    return nearestEnemy
+    flyEnabled = true
 end
 
--- Kill Aura
-spawn(function()
-    while true do
-        if KillAuraEnabled then
-            local enemy = GetNearestEnemy()
-            if enemy then
-                local sword = GetEquippedSword()
-                if sword then
-                    local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Torso")
-                    if enemyRoot then
-                        -- Look at enemy
-                        local character = GetCharacter()
-                        local rootPart = character:FindFirstChild("HumanoidRootPart")
-                        if rootPart then
-                            rootPart.CFrame = CFrame.new(rootPart.Position, Vector3.new(enemyRoot.Position.X, rootPart.Position.Y, enemyRoot.Position.Z))
-                        end
-                        
-                        -- Attack
-                        sword:Activate()
-                    end
-                end
-            end
-            wait(0.1)
-        else
-            wait(0.5)
-        end
+func disableFly()
+    flyEnabled = false
+    
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
     end
-end)
-
--- Auto Farm
-spawn(function()
-    while true do
-        if AutoFarmEnabled then
-            local enemy = GetNearestEnemy()
-            if enemy then
-                local character = GetCharacter()
-                local rootPart = character:FindFirstChild("HumanoidRootPart")
-                local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Torso")
-                local enemyHumanoid = enemy:FindFirstChildOfClass("Humanoid")
-                
-                if rootPart and enemyRoot and enemyHumanoid and enemyHumanoid.Health > 0 then
-                    -- Teleport to enemy
-                    local targetPos = enemyRoot.Position - (enemyRoot.CFrame.LookVector * FarmDistance)
-                    rootPart.CFrame = CFrame.new(targetPos, enemyRoot.Position)
-                    
-                    -- Attack
-                    local sword = GetEquippedSword()
-                    if sword then
-                        sword:Activate()
-                    end
-                end
-            end
-            wait(0.1)
-        else
-            wait(0.5)
-        end
+    
+    if bodyVelocity then
+        bodyVelocity:Destroy()
+        bodyVelocity = nil
     end
-end)
-
--- Auto Collect Drops
-spawn(function()
-    while true do
-        if AutoCollectDropsEnabled then
-            local character = GetCharacter()
-            local rootPart = character:FindFirstChild("HumanoidRootPart")
-            
-            if rootPart then
-                for _, drop in pairs(Workspace:GetDescendants()) do
-                    if drop:IsA("BasePart") and (drop.Name:find("Drop") or drop.Name:find("Coin") or drop.Name:find("Gem") or drop.Name:find("Sword")) then
-                        local distance = (rootPart.Position - drop.Position).Magnitude
-                        if distance < 50 then
-                            -- Tween to drop
-                            local tween = TweenService:Create(rootPart, TweenInfo.new(0.2), {CFrame = drop.CFrame})
-                            tween:Play()
-                            wait(0.2)
-                        end
-                    end
-                end
-            end
-            wait(0.5)
-        else
-            wait(1)
-        end
+    
+    if bodyGyro then
+        bodyGyro:Destroy()
+        bodyGyro = nil
     end
-end)
-
--- WalkSpeed & JumpPower
-spawn(function()
-    while true do
-        local humanoid = GetHumanoid()
+    
+    local character = LocalCharacter
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
         if humanoid then
-            if WalkSpeedEnabled then
-                humanoid.WalkSpeed = WalkSpeedValue
-            end
-            if JumpPowerEnabled then
-                humanoid.JumpPower = JumpPowerValue
-            end
-        end
-        wait(0.1)
-    end
-end)
-
--- ESP Functions
-local function CreateESP(object, text, color)
-    if ESPObjects[object] then return end
-    
-    local esp = {
-        Box = Drawing.new("Square"),
-        Text = Drawing.new("Text"),
-        Tracer = Drawing.new("Line")
-    }
-    
-    esp.Box.Thickness = 1
-    esp.Box.Filled = false
-    esp.Box.Color = color or Color3.fromRGB(255, 0, 0)
-    esp.Box.Transparency = 1
-    
-    esp.Text.Size = 14
-    esp.Text.Center = true
-    esp.Text.Outline = true
-    esp.Text.Color = color or Color3.fromRGB(255, 255, 255)
-    
-    esp.Tracer.Thickness = 1
-    esp.Tracer.Color = color or Color3.fromRGB(255, 255, 255)
-    
-    ESPObjects[object] = esp
-end
-
-local function UpdateESP()
-    for object, esp in pairs(ESPObjects) do
-        local isVisible = false
-        
-        if ESPEnabled and object and object.Parent then
-            local pos, onScreen = Camera:WorldToViewportPoint(object.Position)
-            if onScreen then
-                isVisible = true
-                esp.Box.Visible = true
-                esp.Text.Visible = true
-                esp.Tracer.Visible = true
-                
-                local size = Vector2.new(50, 50)
-                esp.Box.Size = size
-                esp.Box.Position = Vector2.new(pos.X - size.X/2, pos.Y - size.Y/2)
-                
-                esp.Text.Position = Vector2.new(pos.X, pos.Y - size.Y/2 - 15)
-                esp.Text.Text = object.Name
-                
-                esp.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
-                esp.Tracer.To = Vector2.new(pos.X, pos.Y)
-            end
-        end
-        
-        if not isVisible then
-            esp.Box.Visible = false
-            esp.Text.Visible = false
-            esp.Tracer.Visible = false
+            humanoid.PlatformStand = false
         end
     end
 end
 
-RunService.RenderStepped:Connect(UpdateESP)
+func toggleFly()
+    if flyEnabled then
+        disableFly()
+        if flyButton then
+            flyButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+            flyButton.Text = "FLY"
+        end
+        if upButton then upButton.Visible = false end
+        if downButton then downButton.Visible = false end
+    else
+        enableFly()
+        if flyButton then
+            flyButton.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
+            flyButton.Text = "STOP"
+        end
+        if upButton then upButton.Visible = true end
+        if downButton then downButton.Visible = true end
+    end
+end
 
--- Setup ESP for drops
-spawn(function()
-    while true do
-        if ESPEnabled then
-            for _, drop in pairs(Workspace:GetDescendants()) do
-                if drop:IsA("BasePart") and (drop.Name:find("Drop") or drop.Name:find("Coin") or drop.Name:find("Gem") or drop.Name:find("Sword")) then
-                    CreateESP(drop, drop.Name, Color3.fromRGB(255, 215, 0))
+func setupMobileControls()
+    createMobileGUI()
+    
+    -- Fly button
+    flyButton.MouseButton1Click:Connect(func()
+        toggleFly()
+    end)
+    
+    -- Up button (hold)
+    local upConnection = nil
+    upButton.InputBegan:Connect(func(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            upConnection = RunService.RenderStepped:Connect(func()
+                if bodyVelocity then
+                    bodyVelocity.Velocity = bodyVelocity.Velocity + Vector3.new(0, verticalSpeed, 0)
                 end
+            end)
+        end
+    end)
+    
+    upButton.InputEnded:Connect(func(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            if upConnection then
+                upConnection:Disconnect()
+                upConnection = nil
             end
         end
-        wait(2)
-    end
-end)
-
--- No Cooldown (Removes attack cooldown)
-spawn(function()
-    while true do
-        if NoCooldownEnabled then
-            local character = GetCharacter()
-            if character then
-                for _, obj in pairs(character:GetDescendants()) do
-                    if obj:IsA("BoolValue") and obj.Name:find("Cooldown") then
-                        obj.Value = false
-                    end
-                    if obj:IsA("NumberValue") and obj.Name:find("Cooldown") then
-                        obj.Value = 0
-                    end
+    end)
+    
+    -- Down button (hold)
+    local downConnection = nil
+    downButton.InputBegan:Connect(func(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            downConnection = RunService.RenderStepped:Connect(func()
+                if bodyVelocity then
+                    bodyVelocity.Velocity = bodyVelocity.Velocity - Vector3.new(0, verticalSpeed, 0)
                 end
+            end)
+        end
+    end)
+    
+    downButton.InputEnded:Connect(func(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            if downConnection then
+                downConnection:Disconnect()
+                downConnection = nil
+            end
+        end
+    end)
+    
+    -- Touch movement (thumbstick style)
+    local touchStartPos = nil
+    local touchGui = Instance.new("ScreenGui")
+    touchGui.Name = "TouchControls"
+    touchGui.ResetOnSpawn = false
+    
+    local touchFrame = Instance.new("Frame")
+    touchFrame.Name = "TouchFrame"
+    touchFrame.Size = UDim2.new(0, 150, 0, 150)
+    touchFrame.Position = UDim2.new(0, 20, 1, -170)
+    touchFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    touchFrame.BackgroundTransparency = 0.5
+    touchFrame.BorderSizePixel = 0
+    touchFrame.Visible = false
+    touchFrame.Parent = touchGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0.5, 0)
+    corner.Parent = touchFrame
+    
+    local knob = Instance.new("Frame")
+    knob.Name = "Knob"
+    knob.Size = UDim2.new(0, 50, 0, 50)
+    knob.Position = UDim2.new(0.5, -25, 0.5, -25)
+    knob.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    knob.BorderSizePixel = 0
+    knob.Parent = touchFrame
+    
+    local corner2 = Instance.new("UICorner")
+    corner2.CornerRadius = UDim.new(0.5, 0)
+    corner2.Parent = knob
+    
+    if syn then
+        touchGui.Parent = game:GetService("CoreGui")
+    else
+        touchGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    end
+    
+    -- Touch handling
+    local activeTouch = nil
+    
+    touchFrame.InputBegan:Connect(func(input)
+        if input.UserInputType == Enum.UserInputType.Touch and not activeTouch then
+            activeTouch = input
+            touchStartPos = Vector2.new(input.Position.X, input.Position.Y)
+            touchFrame.Visible = true
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(func(input)
+        if input == activeTouch then
+            local delta = Vector2.new(input.Position.X, input.Position.Y) - touchStartPos
+            local maxDist = 50
+            
+            if delta.Magnitude > maxDist then
+                delta = delta.Unit * maxDist
             end
             
-            local sword = GetEquippedSword()
-            if sword then
-                for _, obj in pairs(sword:GetDescendants()) do
-                    if obj:IsA("BoolValue") and obj.Name:find("Cooldown") then
-                        obj.Value = false
-                    end
-                    if obj:IsA("NumberValue") and obj.Name:find("Cooldown") then
-                        obj.Value = 0
-                    end
-                end
-            end
+            knob.Position = UDim2.new(0.5, delta.X - 25, 0.5, delta.Y - 25)
+            
+            -- Normalize to -1 to 1
+            moveVector = Vector3.new(delta.X / maxDist, 0, -delta.Y / maxDist)
+            mobileFlyEnabled = true
         end
-        wait(0.1)
-    end
-end)
-
--- Auto Parry (Blocks when enemy attacks)
-spawn(function()
-    while true do
-        if AutoParryEnabled then
-            local enemy = GetNearestEnemy()
-            if enemy then
-                -- Detect if enemy is attacking (simplified)
-                local sword = enemy:FindFirstChildOfClass("Tool")
-                if sword then
-                    -- Block/Parry logic here
-                    local character = GetCharacter()
-                    if character then
-                        -- Simulate block key press (usually Q or F)
-                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
-                        wait(0.5)
-                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
-                    end
-                end
-            end
+    end)
+    
+    UserInputService.InputEnded:Connect(func(input)
+        if input == activeTouch then
+            activeTouch = nil
+            knob.Position = UDim2.new(0.5, -25, 0.5, -25)
+            moveVector = Vector3.new(0, 0, 0)
+            mobileFlyEnabled = false
         end
-        wait(0.2)
-    end
-end)
+    end)
+end
 
--- God Mode (Sets health to max constantly)
-spawn(function()
-    while true do
-        if GodModeEnabled then
-            local humanoid = GetHumanoid()
-            if humanoid then
-                humanoid.MaxHealth = math.huge
-                humanoid.Health = math.huge
-            end
+func setupPCControls()
+    UserInputService.InputBegan:Connect(func(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.KeyCode == Enum.KeyCode.F then
+            toggleFly()
         end
-        wait(0.5)
-    end
-end)
-
--- ==================== TABS ====================
-
--- ROLLING TAB
-local RollingTab = Window:CreateTab("🎲 Rolling", 4483362458)
-
-RollingTab:CreateSection("Sword Rolling")
-
-RollingTab:CreateToggle({
-    Name = "🎲 Auto Roll",
-    CurrentValue = false,
-    Flag = "AutoRollToggle",
-    Callback = function(Value)
-        AutoRollEnabled = Value
-        Rayfield:Notify({
-            Title = "Auto Roll",
-            Content = Value and "Auto Rolling Enabled" or "Auto Rolling Disabled",
-            Duration = 2
-        })
-    end
-})
-
-RollingTab:CreateSlider({
-    Name = "Roll Amount",
-    Range = {1, 10},
-    Increment = 1,
-    Suffix = " rolls",
-    CurrentValue = 1,
-    Flag = "RollAmountSlider",
-    Callback = function(Value)
-        RollAmount = Value
-    end
-})
-
-RollingTab:CreateButton({
-    Name = "🎲 Roll Once",
-    Callback = function()
-        RollSword(1)
-    end
-})
-
-RollingTab:CreateButton({
-    Name = "🎲 Roll x10",
-    Callback = function()
-        RollSword(10)
-    end
-})
-
-RollingTab:CreateToggle({
-    Name = "⚔️ Auto Equip Best Sword",
-    CurrentValue = false,
-    Flag = "AutoEquipBestToggle",
-    Callback = function(Value)
-        AutoEquipBestEnabled = Value
-        Rayfield:Notify({
-            Title = "Auto Equip",
-            Content = Value and "Auto Equip Best Enabled" or "Auto Equip Best Disabled",
-            Duration = 2
-        })
-    end
-})
-
-RollingTab:CreateButton({
-    Name = "📋 List All Swords",
-    Callback = function()
-        local swords = GetAllSwords()
-        local swordList = table.concat(swords, ", ")
-        Rayfield:Notify({
-            Title = "Available Swords",
-            Content = #swords .. " swords found in ReplicatedStorage.Swords",
-            Duration = 5
-        })
-        print("Swords: " .. swordList)
-    end
-})
-
--- COMBAT TAB
-local CombatTab = Window:CreateTab("⚔️ Combat", 4483362458)
-
-CombatTab:CreateSection("Auto Combat")
-
-CombatTab:CreateToggle({
-    Name = "⚔️ Kill Aura",
-    CurrentValue = false,
-    Flag = "KillAuraToggle",
-    Callback = function(Value)
-        KillAuraEnabled = Value
-        Rayfield:Notify({
-            Title = "Kill Aura",
-            Content = Value and "Kill Aura Enabled" or "Kill Aura Disabled",
-            Duration = 2
-        })
-    end
-})
-
-CombatTab:CreateSlider({
-    Name = "Kill Aura Range",
-    Range = {5, 50},
-    Increment = 5,
-    Suffix = " studs",
-    CurrentValue = 20,
-    Flag = "KillAuraRangeSlider",
-    Callback = function(Value)
-        KillAuraRange = Value
-    end
-})
-
-CombatTab:CreateToggle({
-    Name = "🖱️ Auto Click",
-    CurrentValue = false,
-    Flag = "AutoClickToggle",
-    Callback = function(Value)
-        AutoClickEnabled = Value
-        Rayfield:Notify({
-            Title = "Auto Click",
-            Content = Value and "Auto Click Enabled" or "Auto Click Disabled",
-            Duration = 2
-        })
-    end
-})
-
-CombatTab:CreateToggle({
-    Name = "🛡️ Auto Parry",
-    CurrentValue = false,
-    Flag = "AutoParryToggle",
-    Callback = function(Value)
-        AutoParryEnabled = Value
-        Rayfield:Notify({
-            Title = "Auto Parry",
-            Content = Value and "Auto Parry Enabled" or "Auto Parry Disabled",
-            Duration = 2
-        })
-    end
-})
-
-CombatTab:CreateToggle({
-    Name = "❌ No Cooldown",
-    CurrentValue = false,
-    Flag = "NoCooldownToggle",
-    Callback = function(Value)
-        NoCooldownEnabled = Value
-        Rayfield:Notify({
-            Title = "No Cooldown",
-            Content = Value and "No Cooldown Enabled" or "No Cooldown Disabled",
-            Duration = 2
-        })
-    end
-})
-
--- FARMING TAB
-local FarmingTab = Window:CreateTab("Farming", 4483362458)
-
-FarmingTab:CreateSection("Auto Farming")
-
-FarmingTab:CreateToggle({
-    Name = "Auto Farm",
-    CurrentValue = false,
-    Flag = "AutoFarmToggle",
-    Callback = function(Value)
-        AutoFarmEnabled = Value
-        Rayfield:Notify({
-            Title = "Auto Farm",
-            Content = Value and "Enabled" or "Disabled",
-            Duration = 2
-        })
-    end
-})
-
-FarmingTab:CreateSlider({
-    Name = "Farm Distance",
-    Range = {3, 10},
-    Increment = 1,
-    Suffix = " studs",
-    CurrentValue = 5,
-    Flag = "FarmDistanceSlider",
-    Callback = function(Value)
-        FarmDistance = Value
-    end
-})
-
-FarmingTab:CreateToggle({
-    Name = "Auto Collect Drops",
-    CurrentValue = false,
-    Flag = "AutoCollectDropsToggle",
-    Callback = function(Value)
-        AutoCollectDropsEnabled = Value
-        Rayfield:Notify({
-            Title = "Auto Collect",
-            Content = Value and "Enabled" or "Disabled",
-            Duration = 2
-        })
-    end
-})
-
-FarmingTab:CreateToggle({
-    Name = "ESP (Drops & Enemies)",
-    CurrentValue = false,
-    Flag = "ESPToggle",
-    Callback = function(Value)
-        ESPEnabled = Value
-        Rayfield:Notify({
-            Title = "ESP",
-            Content = Value and "Enabled" or "Disabled",
-            Duration = 2
-        })
-    end
-})
-
--- PLAYER TAB
-local PlayerTab = Window:CreateTab("Player", 4483362458)
-
-PlayerTab:CreateSection("Character Mods")
-
-PlayerTab:CreateToggle({
-    Name = "WalkSpeed",
-    CurrentValue = false,
-    Flag = "WalkSpeedToggle",
-    Callback = function(Value)
-        WalkSpeedEnabled = Value
-        Rayfield:Notify({
-            Title = "WalkSpeed",
-            Content = Value and "Enabled" or "Disabled",
-            Duration = 2
-        })
-    end
-})
-
-PlayerTab:CreateSlider({
-    Name = "WalkSpeed Value",
-    Range = {16, 200},
-    Increment = 5,
-    Suffix = " speed",
-    CurrentValue = 50,
-    Flag = "WalkSpeedSlider",
-    Callback = function(Value)
-        WalkSpeedValue = Value
-    end
-})
-
-PlayerTab:CreateToggle({
-    Name = "JumpPower",
-    CurrentValue = false,
-    Flag = "JumpPowerToggle",
-    Callback = function(Value)
-        JumpPowerEnabled = Value
-        Rayfield:Notify({
-            Title = "JumpPower",
-            Content = Value and "Enabled" or "Disabled",
-            Duration = 2
-        })
-    end
-})
-
-PlayerTab:CreateSlider({
-    Name = "JumpPower Value",
-    Range = {50, 200},
-    Increment = 10,
-    Suffix = " power",
-    CurrentValue = 100,
-    Flag = "JumpPowerSlider",
-    Callback = function(Value)
-        JumpPowerValue = Value
-    end
-})
-
-PlayerTab:CreateToggle({
-    Name = "God Mode",
-    CurrentValue = false,
-    Flag = "GodModeToggle",
-    Callback = function(Value)
-        GodModeEnabled = Value
-        Rayfield:Notify({
-            Title = "God Mode",
-            Content = Value and "Enabled" or "Disabled",
-            Duration = 2
-        })
-    end
-})
-
--- INFO TAB
-local InfoTab = Window:CreateTab("Info", 4483362458)
-
-InfoTab:CreateSection("Game Info")
-
-InfoTab:CreateParagraph({
-    Title = "Sword Folders",
-    Content = "Swords: " .. #SwordsFolder:GetChildren() .. " items\nSwordTools: " .. #SwordToolsFolder:GetChildren() .. " items"
-})
-
-InfoTab:CreateButton({
-    Name = "Refresh Sword Count",
-    Callback = function()
-        Rayfield:Notify({
-            Title = "Sword Count",
-            Content = "Swords: " .. #SwordsFolder:GetChildren() .. "\nTools: " .. #SwordToolsFolder:GetChildren(),
-            Duration = 3
-        })
-    end
-})
-
-InfoTab:CreateSection("Current Status")
-
-InfoTab:CreateButton({
-    Name = "Check Best Sword",
-    Callback = function()
-        if BestSword then
-            Rayfield:Notify({
-                Title = "Best Sword Equipped",
-                Content = BestSword,
-                Duration = 3
-            })
-        else
-            Rayfield:Notify({
-                Title = "Best Sword",
-                Content = "No best sword recorded yet",
-                Duration = 3
-            })
+        
+        if input.KeyCode == Enum.KeyCode.LeftShift then
+            flySpeed = flySpeed * 2
         end
-    end
-})
-
--- SETTINGS TAB
-local SettingsTab = Window:CreateTab("Settings", 4483362458)
-
-SettingsTab:CreateSection("Configuration")
-
-SettingsTab:CreateButton({
-    Name = "Save Config",
-    Callback = function()
-        Rayfield:SaveConfiguration()
-        Rayfield:Notify({
-            Title = "Settings",
-            Content = "Configuration Saved!",
-            Duration = 2
-        })
-    end
-})
-
-SettingsTab:CreateButton({
-    Name = "Destroy UI",
-    Callback = function()
-        for _, esp in pairs(ESPObjects) do
-            for _, drawing in pairs(esp) do
-                drawing:Remove()
-            end
+    end)
+    
+    UserInputService.InputEnded:Connect(func(input)
+        if input.KeyCode == Enum.KeyCode.LeftShift then
+            flySpeed = flySpeed / 2
         end
-        Rayfield:Destroy()
+    end)
+end
+
+func init()
+    -- Detect if mobile
+    local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    
+    if isMobile then
+        setupMobileControls()
+    else
+        setupPCControls()
     end
-})
+    
+    -- Handle character respawn
+    LocalPlayer.CharacterAdded:Connect(func(char)
+        if flyEnabled then
+            wait(0.5)
+            disableFly()
+            wait(0.1)
+            enableFly()
+        end
+    end)
+    
+    print("Fly script loaded! Press F to fly (PC) or use the GUI (Mobile)")
+end
 
-SettingsTab:CreateParagraph({
-    Title = "Credits",
-    Content = "Sword Hub - Made with Rayfield UI"
-})
-
--- Load Configuration
-Rayfield:LoadConfiguration()
-
--- Welcome Notification
-Rayfield:Notify({
-    Title = "Sword Hub Loaded",
-    Content = "Script ready! Use tabs to access features.",
-    Duration = 5
-})
+-- Start
+init()
+]]
