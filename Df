@@ -1,330 +1,646 @@
--- ============================================
--- ULTIMATE HvH VOIDSPAM & RAGEBOT
--- NO SAFETY LIMITS - PURE HvH DOMINATION
--- ============================================
+--[[
+    ╔══════════════════════════════════════════════════════════╗
+    ║  RIVALS - Ultimate VoidSpam + Projectile TP             ║
+    ║  Features: Advanced Desync, Projectile TP, Ragebot      ║
+    ╚══════════════════════════════════════════════════════════╝
+]]
 
--- Load Rayfield
-local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/SiriusSoftwareLtd/Rayfield/main/source.lua'))()
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
 
--- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 
--- State
-local hrp = nil
-local clientCFrame = nil
-local clientVelocity = nil
-local clientAngularVelocity = nil
-local lastHRP = nil
-local VoidspamEnabled = false
-local VoidMethod = "Extreme"
-local DesyncIntensity = 100
-local WeaponSpeed = 0
-local ItemLibrary = nil
-local OriginalReloadLengths = {}
+-- Load LinoriaLib
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
 
--- Cache
-local math_random = math.random
-local math_rad = math.rad
-local CFrame_new = CFrame.new
-local Vector3_new = Vector3.new
+--[[
+    ═══════════════════════════════════════════════════════
+                    CONFIGURATION
+    ═══════════════════════════════════════════════════════
+]]
 
--- Better random with dead zone
-function betterRandom(mi, ma, dmi, dma)
-    dmi = dmi or -1147483646
-    dma = dma or 1147483646
-    local val = math_random(mi, ma)
-    repeat val = math_random(mi, ma) until val < dmi or val > dma
+local Config = {
+    VoidSpam = {
+        Enabled = false,
+        Method = "Extreme Desync",
+        Altitude = 100000,
+        Intensity = 100,
+        UpdateRate = 0,
+    },
+    
+    ProjectileTP = {
+        Enabled = false,
+        AutoShoot = false,
+        TargetPart = "HitBoxHeadSmall",
+        LoopDelay = 0.01,
+        Cache = true,
+    },
+    
+    Ragebot = {
+        Enabled = false,
+        OrbitRadius = 5,
+        OrbitSpeed = 10,
+        ClientTP = true,
+    },
+    
+    Safety = {
+        AutoDisableOnDeath = true,
+        EmergencyKey = Enum.KeyCode.Delete,
+    }
+}
+
+--[[
+    ═══════════════════════════════════════════════════════
+                    VARIABLES
+    ═══════════════════════════════════════════════════════
+]]
+
+local hrp
+local clientCFrame
+local clientVelocity
+local clientAngularVelocity
+local Connections = {}
+local ProjectileCache = {}
+local EnemyCache = {}
+
+--[[
+    ═══════════════════════════════════════════════════════
+                    UTILITY FUNCTIONS
+    ═══════════════════════════════════════════════════════
+]]
+
+function betterRandom(min, max, deadMin, deadMax)
+    local val = math.random(min, max)
+    repeat
+        val = math.random(min, max)
+    until val < deadMin or val > deadMax
     return val
 end
 
-function applyIntensity(value, intensity)
-    if intensity >= 100 then return value end
-    return math.floor(value * (intensity / 100))
+local function IsAlive(player)
+    if not player or not player.Character then return false end
+    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    return humanoid and humanoid.Health > 0
 end
 
--- Weapon Mods - NO LIMITS
-function InitWeaponMods()
-    pcall(function()
-        ItemLibrary = require(ReplicatedStorage.Modules.ItemLibrary)
-        local Items = rawget(ItemLibrary, "Items")
-        if not Items then return end
-        
-        for _, Item in pairs(Items) do
-            local Name = Item.Name
-            if Name ~= "Bow" and Name ~= "Daggers" and Name ~= "Slingshot" then continue end
-            if not Item["ReloadLength"] then continue end
+local function GetClosestEnemy()
+    local closest, closestDistance = nil, math.huge
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsAlive(player) then
+            local character = player.Character
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
             
-            OriginalReloadLengths[Name] = Item.ReloadLength
+            if rootPart then
+                local distance = (LocalPlayer.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude
+                
+                if distance < closestDistance then
+                    closest = player
+                    closestDistance = distance
+                end
+            end
         end
-    end)
+    end
+    
+    return closest
 end
 
-function SetWeaponSpeed(speedPercent)
-    WeaponSpeed = speedPercent
-    if not ItemLibrary then return end
-    
-    pcall(function()
-        local Items = rawget(ItemLibrary, "Items")
-        if not Items then return end
-        
-        for _, Item in pairs(Items) do
-            local Name = Item.Name
-            if Name ~= "Bow" and Name ~= "Daggers" and Name ~= "Slingshot" then continue end
-            if not Item["ReloadLength"] then continue end
-            
-            local original = OriginalReloadLengths[Name] or Item.ReloadLength
-            local newReload = original * (1 - (speedPercent / 100))
-            
-            -- NO SAFETY CAP - TRUE INSTANT
-            rawset(Item, "ReloadLength", newReload)
+local function CacheEnemies()
+    EnemyCache = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsAlive(player) then
+            table.insert(EnemyCache, player)
         end
-    end)
-end
-
--- Void Methods - MAXIMUM DESYNC
-local VoidMethods = {}
-
-VoidMethods["Extreme"] = function()
-    local int32Min = -2147483646
-    local int32Max = 2147483646
-    local deadMin = -1147483646
-    local deadMax = 1147483646
-    
-    local x = applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity)
-    local y = applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity)
-    local z = applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity)
-    
-    hrp.CFrame = CFrame_new(x, y, z) * CFrame.Angles(math_rad(math_random() * math.pi * 2), math_rad(math_random() * math.pi * 2), math_rad(math_random() * math.pi * 2))
-    
-    hrp.AssemblyLinearVelocity = Vector3_new(
-        applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity),
-        applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity),
-        applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity)
-    )
-    
-    hrp.AssemblyAngularVelocity = Vector3_new(
-        applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity),
-        applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity),
-        applyIntensity(betterRandom(int32Min, int32Max, deadMin, deadMax), DesyncIntensity)
-    )
-end
-
-VoidMethods["Fast"] = function()
-    local range = 100000 * (DesyncIntensity / 100)
-    hrp.CFrame = CFrame_new(math_random(-range, range), math_random(-range, range), math_random(-range, range))
-    hrp.AssemblyLinearVelocity = Vector3_new(math_random(-100000, 100000), math_random(-100000, 100000), math_random(-100000, 100000))
-    hrp.AssemblyAngularVelocity = Vector3_new(math_random(-10000, 10000), math_random(-10000, 10000), math_random(-10000, 10000))
-end
-
-VoidMethods["Slow"] = function()
-    local range = 10000 * (DesyncIntensity / 100)
-    hrp.CFrame = CFrame_new(math_random(-range, range), math_random(-1000, 1000), math_random(-range, range))
-    hrp.AssemblyLinearVelocity = Vector3_new(math_random(-50000, 50000), 0, math_random(-50000, 50000))
-    hrp.AssemblyAngularVelocity = Vector3_new(0, math_random(-1000, 1000), 0)
-end
-
-VoidMethods["Random"] = function()
-    local patterns = {"Extreme", "Fast", "Slow"}
-    VoidMethods[patterns[math_random(1, 3)]]()
-end
-
-VoidMethods["Seizure"] = function()
-    for i = 1, 5 do
-        local int32Min = -2147483646
-        local int32Max = 2147483646
-        local deadMin = -1147483646
-        local deadMax = 1147483646
-        hrp.CFrame = CFrame_new(betterRandom(int32Min, int32Max, deadMin, deadMax), betterRandom(int32Min, int32Max, deadMin, deadMax), betterRandom(int32Min, int32Max, deadMin, deadMax))
     end
 end
 
--- Main Loops - NO SAFETY CHECKS
-RunService.Heartbeat:Connect(function()
-    if not VoidspamEnabled then return end
-    if not LocalPlayer.Character then return end
+--[[
+    ═══════════════════════════════════════════════════════
+                    VOID METHODS
+    ═══════════════════════════════════════════════════════
+]]
+
+local VoidMethods = {}
+
+-- 1. Extreme Desync
+VoidMethods["Extreme Desync"] = function()
+    local intensity = Config.VoidSpam.Intensity / 100
+    local range = 2147483646 * intensity
+    local deadZone = 1147483646 * intensity
     
-    hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    hrp.CFrame = CFrame.new(
+        betterRandom(-range, range, -deadZone, deadZone),
+        betterRandom(-range, range, -deadZone, deadZone),
+        betterRandom(-range, range, -deadZone, deadZone)
+    ) * CFrame.Angles(math.rad(math.pi), math.rad(math.pi), math.rad(math.pi))
     
-    if hrp ~= lastHRP then
+    hrp.AssemblyLinearVelocity = Vector3.new(
+        betterRandom(-range, range, -deadZone, deadZone),
+        betterRandom(-range, range, -deadZone, deadZone),
+        betterRandom(-range, range, -deadZone, deadZone)
+    )
+    
+    hrp.AssemblyAngularVelocity = Vector3.new(
+        betterRandom(-range, range, -deadZone, deadZone),
+        betterRandom(-range, range, -deadZone, deadZone),
+        betterRandom(-range, range, -deadZone, deadZone)
+    )
+end
+
+-- 2. Projectile TP Method
+VoidMethods["Projectile TP"] = function()
+    local altitude = Config.VoidSpam.Altitude
+    local currentPos = clientCFrame.Position
+    
+    hrp.CFrame = CFrame.new(
+        currentPos.X + math.random(-100, 100),
+        altitude,
+        currentPos.Z + math.random(-100, 100)
+    )
+    
+    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+end
+
+-- 3. Orbital Void
+VoidMethods["Orbital Void"] = function()
+    local altitude = Config.VoidSpam.Altitude
+    local time = tick()
+    local radius = 50
+    
+    hrp.CFrame = CFrame.new(
+        math.sin(time * 2) * radius,
+        altitude,
+        math.cos(time * 2) * radius
+    )
+    
+    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+end
+
+-- 4. Controlled Void
+VoidMethods["Controlled Void"] = function()
+    local altitude = Config.VoidSpam.Altitude
+    
+    hrp.CFrame = CFrame.new(
+        betterRandom(-1000, 1000, -500, 500),
+        altitude,
+        betterRandom(-1000, 1000, -500, 500)
+    )
+    
+    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+end
+
+-- 5. Seizure Mode
+VoidMethods["Seizure Mode"] = function()
+    local positions = {
+        Vector3.new(100000, 100000, 100000),
+        Vector3.new(-100000, 100000, -100000),
+        Vector3.new(100000, -100000, 100000),
+        Vector3.new(-100000, -100000, -100000),
+    }
+    
+    local index = math.floor(tick() * 10) % #positions + 1
+    hrp.CFrame = CFrame.new(positions[index])
+    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+end
+
+--[[
+    ═══════════════════════════════════════════════════════
+                    PROJECTILE TP SYSTEM
+    ═══════════════════════════════════════════════════════
+]]
+
+local function FindCoreProjectile()
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj.Name == "CoreProjectile" and obj:FindFirstChild("TouchInterest") then
+            return obj
+        end
+    end
+    return nil
+end
+
+local function GetEnemyHitbox(enemy)
+    if not enemy or not enemy.Character then return nil end
+    
+    local targetPart = Config.ProjectileTP.TargetPart
+    local hitbox = enemy.Character:FindFirstChild(targetPart)
+    
+    if not hitbox then
+        hitbox = enemy.Character:FindFirstChild("HitBoxHead")
+            or enemy.Character:FindFirstChild("HitBoxHeadSmall")
+            or enemy.Character:FindFirstChild("Head")
+    end
+    
+    return hitbox
+end
+
+Connections.ProjectileTP = RunService.Heartbeat:Connect(function()
+    if not Config.ProjectileTP.Enabled then return end
+    
+    pcall(function()
+        local projectile = FindCoreProjectile()
+        
+        if projectile then
+            if Config.ProjectileTP.Cache and not ProjectileCache[projectile] then
+                ProjectileCache[projectile] = true
+            end
+            
+            CacheEnemies()
+            
+            for _, enemy in ipairs(EnemyCache) do
+                local hitbox = GetEnemyHitbox(enemy)
+                
+                if hitbox then
+                    firetouchinterest(projectile, hitbox, 0)
+                    task.wait(Config.ProjectileTP.LoopDelay)
+                    firetouchinterest(projectile, hitbox, 1)
+                end
+            end
+        end
+    end)
+end)
+
+--[[
+    ═══════════════════════════════════════════════════════
+                    RAGEBOT
+    ═══════════════════════════════════════════════════════
+]]
+
+Connections.Ragebot = RunService.Heartbeat:Connect(function()
+    if not Config.Ragebot.Enabled then return end
+    
+    pcall(function()
+        local enemy = GetClosestEnemy()
+        
+        if enemy and enemy.Character then
+            local enemyRoot = enemy.Character:FindFirstChild("HumanoidRootPart")
+            
+            if enemyRoot and Config.Ragebot.ClientTP then
+                local playerRoot = LocalPlayer.Character.HumanoidRootPart
+                
+                local time = tick() * Config.Ragebot.OrbitSpeed
+                local radius = Config.Ragebot.OrbitRadius
+                
+                local offset = Vector3.new(
+                    math.sin(time) * radius,
+                    0,
+                    math.cos(time) * radius
+                )
+                
+                enemyRoot.CFrame = CFrame.new(playerRoot.Position + offset)
+            end
+        end
+    end)
+end)
+
+--[[
+    ═══════════════════════════════════════════════════════
+                    VOID SPAM MAIN SYSTEM
+    ═══════════════════════════════════════════════════════
+]]
+
+Connections.VoidHeartbeat = RunService.Heartbeat:Connect(function()
+    if not Config.VoidSpam.Enabled then return end
+    
+    pcall(function()
+        hrp = LocalPlayer.Character.HumanoidRootPart
+        
         clientCFrame = hrp.CFrame
         clientVelocity = hrp.AssemblyLinearVelocity
         clientAngularVelocity = hrp.AssemblyAngularVelocity
-        lastHRP = hrp
+        
+        local method = VoidMethods[Config.VoidSpam.Method]
+        if method then
+            method()
+        end
+    end)
+end)
+
+Connections.VoidRender = RunService:BindToRenderStep("VoidRestore", Enum.RenderPriority.First.Value, function()
+    if hrp and Config.VoidSpam.Enabled then
+        pcall(function()
+            hrp.CFrame = clientCFrame
+            hrp.AssemblyLinearVelocity = clientVelocity
+            hrp.AssemblyAngularVelocity = clientAngularVelocity
+        end)
     end
+end)
+
+--[[
+    ═══════════════════════════════════════════════════════
+                    AUTO SHOOT SYSTEM
+    ═══════════════════════════════════════════════════════
+]]
+
+Connections.AutoShoot = RunService.Heartbeat:Connect(function()
+    if not Config.ProjectileTP.AutoShoot then return end
     
-    local method = VoidMethods[VoidMethod]
-    if method then method() end
+    pcall(function()
+        local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+        if tool then
+            tool:Activate()
+        end
+    end)
 end)
 
-RunService:BindToRenderStep("VoidRestore", Enum.RenderPriority.First.Value, function()
-    if not VoidspamEnabled then return end
-    if not hrp then return end
-    if clientCFrame then hrp.CFrame = clientCFrame end
-    if clientVelocity then hrp.AssemblyLinearVelocity = clientVelocity end
-    if clientAngularVelocity then hrp.AssemblyAngularVelocity = clientAngularVelocity end
-end)
+--[[
+    ═══════════════════════════════════════════════════════
+                    SAFETY FEATURES
+    ═══════════════════════════════════════════════════════
+]]
 
--- Emergency Stop Only
-function EmergencyStop()
-    VoidspamEnabled = false
-    if hrp and clientCFrame then
-        hrp.CFrame = clientCFrame
-        hrp.AssemblyLinearVelocity = Vector3_new(0, 0, 0)
-        hrp.AssemblyAngularVelocity = Vector3_new(0, 0, 0)
+LocalPlayer.CharacterAdded:Connect(function(character)
+    if Config.Safety.AutoDisableOnDeath then
+        Config.VoidSpam.Enabled = false
+        Config.ProjectileTP.Enabled = false
+        Config.Ragebot.Enabled = false
+        
+        hrp = nil
+        
+        character:WaitForChild("HumanoidRootPart", 5)
+        task.wait(0.5)
     end
-end
+end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.Delete then EmergencyStop() end
+    
+    if input.KeyCode == Config.Safety.EmergencyKey then
+        Config.VoidSpam.Enabled = false
+        Config.ProjectileTP.Enabled = false
+        Config.Ragebot.Enabled = false
+        
+        if hrp and clientCFrame then
+            hrp.CFrame = clientCFrame
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end
+        
+        Library:Notify('Emergency Stop', 'All features disabled!', 3)
+    end
 end)
 
--- RAYFIELD UI
-local Window = Rayfield:CreateWindow({
-    Name = "⚔️ HvH DOMINATION",
-    LoadingTitle = "Loading HvH Script...",
-    LoadingSubtitle = "NO SAFETY - MAXIMUM POWER",
-    ConfigurationSaving = {Enabled = true, FolderName = "HvH", FileName = "Config"},
-    Discord = {Enabled = false},
-    KeySystem = false
+--[[
+    ═══════════════════════════════════════════════════════
+                    UI CREATION
+    ═══════════════════════════════════════════════════════
+]]
+
+local Window = Library:CreateWindow({
+    Title = 'Rivals | Ultimate VoidSpam + Projectile TP',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8,
+    MenuFadeTime = 0.2
 })
 
-local VoidTab = Window:CreateTab("🌌 VOIDSPAM", 4483362458)
-local WeaponTab = Window:CreateTab("🔫 RAGEBOT", 4483362458)
-local StatusTab = Window:CreateTab("📊 STATUS", 4483362458)
+local Tabs = {
+    VoidSpam = Window:AddTab('Void Spam'),
+    ProjectileTP = Window:AddTab('Projectile TP'),
+    Ragebot = Window:AddTab('Ragebot'),
+    Settings = Window:AddTab('Settings')
+}
 
--- VOIDSPAM TAB
-VoidTab:CreateSection("DESYNC CONTROLS")
+-- Void Spam Tab
+local VoidGroup = Tabs.VoidSpam:AddLeftGroupbox('Void System')
 
-VoidTab:CreateToggle({
-    Name = "🔥 ENABLE VOIDSPAM",
-    CurrentValue = false,
-    Flag = "VoidEnabled",
+VoidGroup:AddToggle('VoidEnabled', {
+    Text = 'Enable Void Spam',
+    Default = false,
+    Tooltip = 'Enable position desync',
     Callback = function(Value)
-        VoidspamEnabled = Value
-        Rayfield:Notify({Title = Value and "VOIDSPAM ON" or "VOIDSPAM OFF", Content = Value and "Server sees FAKE position - YOU ARE UNHITTABLE" or "Position restored", Duration = 3})
+        Config.VoidSpam.Enabled = Value
     end
 })
 
-VoidTab:CreateDropdown({
-    Name = "Desync Method",
-    Options = {"Extreme", "Fast", "Slow", "Random", "Seizure"},
-    CurrentOption = {"Extreme"},
-    MultipleOptions = false,
-    Flag = "VoidMethod",
-    Callback = function(Option)
-        VoidMethod = Option[1]
-        Rayfield:Notify({Title = "Method: " .. Option[1], Content = "Desync pattern changed", Duration = 2})
-    end
-})
-
-VoidTab:CreateSlider({
-    Name = "Desync Intensity",
-    Range = {0, 100},
-    Increment = 1,
-    Suffix = "%",
-    CurrentValue = 100,
-    Flag = "Intensity",
-    Callback = function(Value) DesyncIntensity = Value end
-})
-
-VoidTab:CreateParagraph({Title = "EXTREME", Content = "Full int32 range. Most unhittable. Use for HvH."})
-VoidTab:CreateParagraph({Title = "SEIZURE", Content = "5 position switches per frame. Maximum confusion."})
-
--- RAGEBOT TAB
-WeaponTab:CreateSection("WEAPON MODS - NO LIMITS")
-
-WeaponTab:CreateSlider({
-    Name = "Fire Rate Speed",
-    Range = {0, 100},
-    Increment = 1,
-    Suffix = "%",
-    CurrentValue = 0,
-    Flag = "WeaponSpeed",
+VoidGroup:AddDropdown('VoidMethod', {
+    Values = {'Extreme Desync', 'Projectile TP', 'Orbital Void', 'Controlled Void', 'Seizure Mode'},
+    Default = 1,
+    Multi = false,
+    Text = 'Void Method',
+    Tooltip = 'Select void spam method',
     Callback = function(Value)
-        SetWeaponSpeed(Value)
-        Rayfield:Notify({Title = "Weapons: " .. Value .. "%", Content = Value == 100 and "🔥 TRUE INSTANT FIRE" or "Speed increased", Duration = 2})
+        Config.VoidSpam.Method = Value
     end
 })
 
-WeaponTab:CreateButton({
-    Name = "🔥 INSTANT FIRE (100%) - NO LIMIT",
-    Callback = function()
-        SetWeaponSpeed(100)
-        Rayfield:Notify({Title = "🔥 TRUE INSTANT", Content = "Bow/Daggers/Slingshot - NO DELAY AT ALL", Duration = 5})
+VoidGroup:AddSlider('VoidAltitude', {
+    Text = 'Altitude',
+    Default = 100000,
+    Min = 1000,
+    Max = 500000,
+    Rounding = 0,
+    Compact = false,
+    Callback = function(Value)
+        Config.VoidSpam.Altitude = Value
     end
 })
 
-WeaponTab:CreateButton({
-    Name = "🌀 RAPID FIRE MODE (500%) - BROKEN",
-    Callback = function()
-        -- OVERRIDE TO NEGATIVE FOR BROKEN SPEED
-        if not ItemLibrary then return end
-        pcall(function()
-            local Items = rawget(ItemLibrary, "Items")
-            for _, Item in pairs(Items) do
-                if Item.Name == "Bow" or Item.Name == "Daggers" or Item.Name == "Slingshot" then
-                    if Item["ReloadLength"] then
-                        rawset(Item, "ReloadLength", -1) -- NEGATIVE = BROKEN FAST
-                    end
-                end
+VoidGroup:AddSlider('VoidIntensity', {
+    Text = 'Intensity %',
+    Default = 100,
+    Min = 10,
+    Max = 100,
+    Rounding = 0,
+    Compact = false,
+    Callback = function(Value)
+        Config.VoidSpam.Intensity = Value
+    end
+})
+
+local VoidInfoGroup = Tabs.VoidSpam:AddRightGroupbox('How It Works')
+
+VoidInfoGroup:AddLabel('SERVER SEES:')
+VoidInfoGroup:AddLabel('Random extreme positions')
+VoidInfoGroup:AddLabel('100k studs away')
+VoidInfoGroup:AddLabel('Impossible to hit')
+VoidInfoGroup:AddLabel('')
+VoidInfoGroup:AddLabel('CLIENT SEES:')
+VoidInfoGroup:AddLabel('Normal position')
+VoidInfoGroup:AddLabel('You can still aim/move')
+VoidInfoGroup:AddLabel('')
+VoidInfoGroup:AddLabel('Heartbeat = Fake position')
+VoidInfoGroup:AddLabel('RenderStep = Real position')
+
+-- Projectile TP Tab
+local ProjectileGroup = Tabs.ProjectileTP:AddLeftGroupbox('Projectile Teleport')
+
+ProjectileGroup:AddToggle('ProjectileEnabled', {
+    Text = 'Enable Projectile TP',
+    Default = false,
+    Tooltip = 'Auto-hit with projectiles',
+    Callback = function(Value)
+        Config.ProjectileTP.Enabled = Value
+    end
+})
+
+ProjectileGroup:AddToggle('ProjectileAutoShoot', {
+    Text = 'Auto Shoot',
+    Default = false,
+    Tooltip = 'Automatically shoot',
+    Callback = function(Value)
+        Config.ProjectileTP.AutoShoot = Value
+    end
+})
+
+ProjectileGroup:AddDropdown('ProjectileHitbox', {
+    Values = {'HitBoxHeadSmall', 'HitBoxHead', 'Head'},
+    Default = 1,
+    Multi = false,
+    Text = 'Target Hitbox',
+    Tooltip = 'Which hitbox to hit',
+    Callback = function(Value)
+        Config.ProjectileTP.TargetPart = Value
+    end
+})
+
+ProjectileGroup:AddSlider('ProjectileDelay', {
+    Text = 'Loop Delay',
+    Default = 10,
+    Min = 1,
+    Max = 100,
+    Rounding = 0,
+    Compact = false,
+    Callback = function(Value)
+        Config.ProjectileTP.LoopDelay = Value / 1000
+    end
+})
+
+local ProjectileInfoGroup = Tabs.ProjectileTP:AddRightGroupbox('Projectile TP Info')
+
+ProjectileInfoGroup:AddLabel('HOW IT WORKS:')
+ProjectileInfoGroup:AddLabel('')
+ProjectileInfoGroup:AddLabel('1. You shoot = CoreProjectile')
+ProjectileInfoGroup:AddLabel('   created in workspace')
+ProjectileInfoGroup:AddLabel('')
+ProjectileInfoGroup:AddLabel('2. Go 100k studs up')
+ProjectileInfoGroup:AddLabel('   = Map unloads')
+ProjectileInfoGroup:AddLabel('   = No collision checks')
+ProjectileInfoGroup:AddLabel('')
+ProjectileInfoGroup:AddLabel('3. FireTouchInterest')
+ProjectileInfoGroup:AddLabel('   on enemy hitbox')
+ProjectileInfoGroup:AddLabel('')
+ProjectileInfoGroup:AddLabel('Result: Instant hit!')
+
+-- Ragebot Tab
+local RagebotGroup = Tabs.Ragebot:AddLeftGroupbox('Ragebot')
+
+RagebotGroup:AddToggle('RagebotEnabled', {
+    Text = 'Enable Ragebot',
+    Default = false,
+    Tooltip = 'Orbit around enemies',
+    Callback = function(Value)
+        Config.Ragebot.Enabled = Value
+    end
+})
+
+RagebotGroup:AddToggle('RagebotClientTP', {
+    Text = 'Client-Side Enemy TP',
+    Default = true,
+    Tooltip = 'TP enemy to you (visual only)',
+    Callback = function(Value)
+        Config.Ragebot.ClientTP = Value
+    end
+})
+
+RagebotGroup:AddSlider('RagebotOrbitRadius', {
+    Text = 'Orbit Radius',
+    Default = 5,
+    Min = 1,
+    Max = 50,
+    Rounding = 0,
+    Compact = false,
+    Callback = function(Value)
+        Config.Ragebot.OrbitRadius = Value
+    end
+})
+
+RagebotGroup:AddSlider('RagebotOrbitSpeed', {
+    Text = 'Orbit Speed',
+    Default = 10,
+    Min = 1,
+    Max = 50,
+    Rounding = 0,
+    Compact = false,
+    Callback = function(Value)
+        Config.Ragebot.OrbitSpeed = Value
+    end
+})
+
+local RagebotInfoGroup = Tabs.Ragebot:AddRightGroupbox('Ragebot Info')
+
+RagebotInfoGroup:AddLabel('ENEMY DISAPPEARS:')
+RagebotInfoGroup:AddLabel('')
+RagebotInfoGroup:AddLabel('Client-side TP enemy')
+RagebotInfoGroup:AddLabel('to your position')
+RagebotInfoGroup:AddLabel('')
+RagebotInfoGroup:AddLabel('You orbit around them')
+RagebotInfoGroup:AddLabel('= Minimize delay')
+RagebotInfoGroup:AddLabel('= Maximize hit chance')
+RagebotInfoGroup:AddLabel('')
+RagebotInfoGroup:AddLabel('Only YOU see this!')
+RagebotInfoGroup:AddLabel('Enemy sees you normal')
+
+-- Settings Tab
+local SettingsGroup = Tabs.Settings:AddLeftGroupbox('Safety')
+
+SettingsGroup:AddToggle('AutoDisable', {
+    Text = 'Auto Disable on Death',
+    Default = true,
+    Tooltip = 'Disable all on respawn',
+    Callback = function(Value)
+        Config.Safety.AutoDisableOnDeath = Value
+    end
+})
+
+SettingsGroup:AddLabel('Emergency Stop Key: Delete')
+SettingsGroup:AddLabel('Restores position & disables all')
+
+SettingsGroup:AddDivider()
+
+SettingsGroup:AddButton({
+    Text = 'Unload Script',
+    Func = function()
+        for _, connection in pairs(Connections) do
+            if typeof(connection) == "RBXScriptConnection" then
+                connection:Disconnect()
             end
-        end)
-        Rayfield:Notify({Title = "🌀 BROKEN MODE", Content = "ReloadLength set to -1 (BROKEN FAST)", Duration = 5})
-    end
+        end
+        
+        RunService:UnbindFromRenderStep("VoidRestore")
+        
+        if hrp and clientCFrame then
+            hrp.CFrame = clientCFrame
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end
+        
+        Library:Unload()
+    end,
+    DoubleClick = true,
+    Tooltip = 'Double click to unload'
 })
 
-WeaponTab:CreateParagraph({Title = "⚠️ NO SAFETY", Content = "Daggers have NO 0.01s cap. Can be truly instant or negative (broken)."})
+Library:SetWatermarkVisibility(true)
+Library:SetWatermark('Rivals | Ultimate VoidSpam + Projectile TP')
 
--- STATUS TAB
-StatusTab:CreateSection("LIVE MONITOR")
+ThemeManager:SetLibrary(Library)
+ThemeManager:SetFolder('RivalsVoidSpam')
+ThemeManager:ApplyToTab(Tabs.Settings)
 
-local VoidStatus = StatusTab:CreateLabel("Voidspam: OFF")
-local MethodStatus = StatusTab:CreateLabel("Method: Extreme")
-local WeaponStatus = StatusTab:CreateLabel("Weapons: Normal")
+SaveManager:SetLibrary(Library)
+SaveManager:SetFolder('RivalsVoidSpam/configs')
+SaveManager:BuildConfigSection(Tabs.Settings)
+SaveManager:LoadAutoloadConfig()
 
-RunService.RenderStepped:Connect(function()
-    VoidStatus:Set(VoidspamEnabled and "Voidspam: 🔥 UNHITTABLE" or "Voidspam: ❌ OFF")
-    MethodStatus:Set("Method: " .. VoidMethod)
-    WeaponStatus:Set("Weapons: " .. (WeaponSpeed == 100 and "🔥 INSTANT" or WeaponSpeed == 0 and "Normal" or WeaponSpeed .. "% FAST"))
-end)
-
-StatusTab:CreateSection("CONTROLS")
-
-StatusTab:CreateButton({
-    Name = "🛑 EMERGENCY STOP (DELETE)",
-    Callback = function()
-        EmergencyStop()
-        Rayfield:Notify({Title = "EMERGENCY STOP", Content = "All features disabled", Duration = 3})
-    end
-})
-
-StatusTab:CreateButton({
-    Name = "💾 SAVE CONFIG",
-    Callback = function()
-        Rayfield:SaveConfiguration()
-        Rayfield:Notify({Title = "SAVED", Content = "Configuration saved", Duration = 2})
-    end
-})
-
-StatusTab:CreateButton({
-    Name = "❌ DESTROY UI",
-    Callback = function()
-        VoidspamEnabled = false
-        SetWeaponSpeed(0)
-        EmergencyStop()
-        Rayfield:Destroy()
-    end
-})
-
--- INIT
-InitWeaponMods()
-Rayfield:Notify({Title = "⚔️ HvH SCRIPT LOADED", Content = "NO SAFETY LIMITS ACTIVE", Duration = 5})
-Rayfield:Notify({Title = "🔥 FEATURES", Content = "Extreme desync + Broken weapon speeds", Duration = 5})
-Rayfield:LoadConfiguration()
+Library:Notify('Rivals VoidSpam', 'Script loaded! Press RightShift to toggle UI', 5)
