@@ -1,693 +1,473 @@
---[[
-    ╔══════════════════════════════════════════════════════════╗
-    ║  RIVALS - VoidSpam + Anti Aim                           ║
-    ║  UI: Rayfield                                           ║
-    ╚══════════════════════════════════════════════════════════╝
-]]
-
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local workspace = game:GetService("Workspace")
+local TweenService     = game:GetService("TweenService")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local LocalPlayer      = Players.LocalPlayer
 
-local LocalPlayer = Players.LocalPlayer
+local BYPASS_SPEED = 100
+local WALK_SPEED   = 16
+local LAG_AMOUNT   = 1
 
--- Load Rayfield
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local enabled         = false
+local walkEnabled     = false
+local toggleKey       = Enum.KeyCode.V
+local walkKey         = Enum.KeyCode.B
+local listeningForKey = false
+local listeningForWalkKey = false
+local minimized       = false
+local lastKeybindSet  = 0
+local lastWalkKeybindSet = 0
 
---[[
-    ═══════════════════════════════════════════════════════
-                    CONFIGURATION
-    ═══════════════════════════════════════════════════════
-]]
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    if char then
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum  = char:FindFirstChildOfClass("Humanoid")
 
-local Config = {
-    Main = {
-        Enabled = false,
-        FOV = 360,
-    },
-
-    Ragebot = {
-        Enabled = false,
-        VoidSpam = false,
-        HideTime = 0.25,
-        AttackTime = 0.1,
-        ShootAttempts = 1,
-    },
-
-    AntiAim = {
-        Enabled = false,
-
-        -- Pitch
-        Pitch = "Off",
-
-        -- Yaw
-        YawBase = "Local",
-        Yaw = "Off",
-        YawAngle = 0,
-    },
-
-    Safety = {
-        EmergencyKey = Enum.KeyCode.Delete,
-    }
-}
-
---[[
-    ═══════════════════════════════════════════════════════
-                    VARIABLES
-    ═══════════════════════════════════════════════════════
-]]
-
-local hrp
-local clientCFrame
-local clientVelocity
-local clientAngularVelocity
-local Connections = {}
-local isHiding = false
-local isAttacking = false
-local camera = workspace.CurrentCamera
-
---[[
-    ═══════════════════════════════════════════════════════
-                    UTILITY
-    ═══════════════════════════════════════════════════════
-]]
-
-local function IsAlive(player)
-    if not player or not player.Character then return false end
-    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-    return humanoid and humanoid.Health > 0
-end
-
-local function GetClosestEnemy()
-    local closest, closestDistance = nil, math.huge
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and IsAlive(player) then
-            local character = player.Character
-            local rootPart = character:FindFirstChild("HumanoidRootPart")
-            if rootPart and LocalPlayer.Character then
-                local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if myRoot then
-                    local distance = (myRoot.Position - rootPart.Position).Magnitude
-                    if distance < closestDistance then
-                        closest = player
-                        closestDistance = distance
-                    end
-                end
-            end
-        end
-    end
-    return closest
-end
-
---[[
-    ═══════════════════════════════════════════════════════
-                    VOID SPAM
-    ═══════════════════════════════════════════════════════
-]]
-
-local function ApplyVoid()
-    if not hrp then return end
-    local range = 2147483646
-    local deadZone = 1147483646
-
-    local function betterRandom()
-        local val
-        repeat
-            val = math.random(-range, range)
-        until val < -deadZone or val > deadZone
-        return val
-    end
-
-    hrp.CFrame = CFrame.new(
-        betterRandom(),
-        betterRandom(),
-        betterRandom()
-    )
-
-    hrp.AssemblyLinearVelocity = Vector3.new(
-        betterRandom(),
-        betterRandom(),
-        betterRandom()
-    )
-
-    hrp.AssemblyAngularVelocity = Vector3.new(
-        betterRandom(),
-        betterRandom(),
-        betterRandom()
-    )
-end
-
-local function RestorePosition()
-    if not hrp or not clientCFrame then return end
-    hrp.CFrame = clientCFrame
-    hrp.AssemblyLinearVelocity = clientVelocity or Vector3.zero
-    hrp.AssemblyAngularVelocity = clientAngularVelocity or Vector3.zero
-end
-
---[[
-    ═══════════════════════════════════════════════════════
-                    ANTI AIM SYSTEM
-    ═══════════════════════════════════════════════════════
-]]
-
-local glitchTick = 0
-local spinAngle = 0
-local stutterState = false
-
-local function GetPitchAngle()
-    local pitch = Config.AntiAim.Pitch
-    if pitch == "Off" then return 0
-    elseif pitch == "Up" then return 89
-    elseif pitch == "Zero" then return 0
-    elseif pitch == "Down" then return -89
-    elseif pitch == "Glitch" then
-        return math.random(-89, 89)
-    elseif pitch == "Random" then
-        return math.random(-89, 89)
-    end
-    return 0
-end
-
-local function GetYawAngle()
-    local yaw = Config.AntiAim.Yaw
-    local base = Config.AntiAim.YawBase
-    local time = tick()
-
-    -- Get base direction
-    local baseAngle = 0
-    if base == "Local" then
-        if hrp then
-            local _, yRot, _ = hrp.CFrame:ToEulerAnglesYXZ()
-            baseAngle = math.deg(yRot)
-        end
-    elseif base == "At Targets" then
-        local enemy = GetClosestEnemy()
-        if enemy and enemy.Character and hrp then
-            local enemyRoot = enemy.Character:FindFirstChild("HumanoidRootPart")
-            if enemyRoot then
-                local direction = (enemyRoot.Position - hrp.Position)
-                baseAngle = math.deg(math.atan2(direction.X, direction.Z))
-            end
-        end
-    end
-
-    -- Apply yaw method
-    if yaw == "Off" then
-        return baseAngle + Config.AntiAim.YawAngle
-
-    elseif yaw == "Forward" then
-        return baseAngle + Config.AntiAim.YawAngle
-
-    elseif yaw == "Backward" then
-        return baseAngle + 180 + Config.AntiAim.YawAngle
-
-    elseif yaw == "Spin" then
-        spinAngle = spinAngle + 15
-        if spinAngle >= 360 then spinAngle = 0 end
-        return baseAngle + spinAngle + Config.AntiAim.YawAngle
-
-    elseif yaw == "Glitch Spin" then
-        spinAngle = spinAngle + math.random(10, 45)
-        if spinAngle >= 360 then spinAngle = 0 end
-        return baseAngle + spinAngle + Config.AntiAim.YawAngle
-
-    elseif yaw == "Stutter Spin" then
-        stutterState = not stutterState
-        if stutterState then
-            spinAngle = spinAngle + 90
-        end
-        if spinAngle >= 360 then spinAngle = 0 end
-        return baseAngle + spinAngle + Config.AntiAim.YawAngle
-    end
-
-    return baseAngle + Config.AntiAim.YawAngle
-end
-
--- Anti Aim Render Loop
-RunService:BindToRenderStep("AntiAim", Enum.RenderPriority.Character.Value + 1, function()
-    if not Config.AntiAim.Enabled then return end
-    if not Config.Main.Enabled then return end
-    if isHiding then return end
-
-    pcall(function()
-        local character = LocalPlayer.Character
-        if not character then return end
-
-        hrp = character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-
-        local pitchAngle = GetPitchAngle()
-        local yawAngle = GetYawAngle()
-
-        -- Apply anti aim angles
-        hrp.CFrame = CFrame.new(hrp.Position)
-            * CFrame.Angles(
-                math.rad(pitchAngle),
-                math.rad(yawAngle),
-                0
+        if enabled and root and hum and hum.MoveDirection.Magnitude > 0 then
+            local dir = hum.MoveDirection.Unit
+            root.AssemblyLinearVelocity = Vector3.new(
+                dir.X * BYPASS_SPEED,
+                root.AssemblyLinearVelocity.Y,
+                dir.Z * BYPASS_SPEED
             )
-    end)
-end)
-
---[[
-    ═══════════════════════════════════════════════════════
-                    FOV SYSTEM
-    ═══════════════════════════════════════════════════════
-]]
-
-RunService:BindToRenderStep("FOV", Enum.RenderPriority.Camera.Value, function()
-    if not Config.Main.Enabled then return end
-    pcall(function()
-        camera = workspace.CurrentCamera
-        if camera then
-            camera.FieldOfView = Config.Main.FOV
         end
-    end)
+
+        if walkEnabled and hum then
+            hum.WalkSpeed = WALK_SPEED
+        end
+    end
+
+    if enabled then
+        local t = tick()
+        while tick() - t < LAG_AMOUNT * 0.1 do end
+    end
 end)
 
---[[
-    ═══════════════════════════════════════════════════════
-                    RAGEBOT LOOP
-    ═══════════════════════════════════════════════════════
-]]
-
-local function RagebotLoop()
-    while Config.Ragebot.Enabled do
-        pcall(function()
-            local character = LocalPlayer.Character
-            if not character then return end
-
-            hrp = character:FindFirstChild("HumanoidRootPart")
-            if not hrp then return end
-
-            -- Store real position
-            clientCFrame = hrp.CFrame
-            clientVelocity = hrp.AssemblyLinearVelocity
-            clientAngularVelocity = hrp.AssemblyAngularVelocity
-
-            -- HIDE PHASE
-            isHiding = true
-            isAttacking = false
-
-            if Config.Ragebot.VoidSpam then
-                ApplyVoid()
-            end
-
-            task.wait(Config.Ragebot.HideTime)
-
-            -- ATTACK PHASE
-            isHiding = false
-            isAttacking = true
-
-            RestorePosition()
-
-            -- Shoot attempts
-            for i = 1, Config.Ragebot.ShootAttempts do
-                pcall(function()
-                    local tool = character:FindFirstChildOfClass("Tool")
-                    if tool then
-                        local enemy = GetClosestEnemy()
-                        if enemy and enemy.Character then
-                            local enemyHead = enemy.Character:FindFirstChild("Head")
-                            if enemyHead and hrp then
-                                hrp.CFrame = CFrame.lookAt(
-                                    hrp.Position,
-                                    enemyHead.Position
-                                )
-                            end
-                        end
-                        tool:Activate()
-                    end
-                end)
-
-                if i < Config.Ragebot.ShootAttempts then
-                    task.wait(0.01)
-                end
-            end
-
-            task.wait(Config.Ragebot.AttackTime)
-            isAttacking = false
-        end)
+for _, v in pairs(workspace:GetDescendants()) do
+    if v:IsA("Texture") or v:IsA("Decal") then v:Destroy()
+    elseif v:IsA("Part") and v.Material ~= Enum.Material.Neon and v.Material ~= Enum.Material.ForceField then
+        v.Material = Enum.Material.SmoothPlastic
     end
 end
 
+local RED    = Color3.fromRGB(220, 30,  30)
+local WINE   = Color3.fromRGB(140, 10,  40)
+local DARK   = Color3.fromRGB(12,  12,  20)
+local ROW_BG = Color3.fromRGB(20,  20,  35)
+local BTN_BG = Color3.fromRGB(30,  10,  15)
+
+local TITLE_GRAD = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,   Color3.fromRGB(220, 30,  30)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(160, 10,  45)),
+    ColorSequenceKeypoint.new(1,   Color3.fromRGB(255, 80,  80)),
+})
+
+local function animGrad(grad, speed)
+    task.spawn(function()
+        while grad and grad.Parent do
+            grad.Rotation = (grad.Rotation + speed) % 360
+            task.wait()
+        end
+    end)
+end
+
+local function redStroke(parent, thickness)
+    local s = Instance.new("UIStroke")
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Thickness = thickness or 1.5
+    s.Color     = RED
+    s.Parent    = parent
+end
+
+local existing = game:GetService("CoreGui"):FindFirstChild("CursedBypass")
+if existing then existing:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name           = "CursedBypass"
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder   = 999
+ScreenGui.Parent         = game.CoreGui
+
+local GUI_W   = 210
+local GUI_H   = 290
+local GUI_MIN = 40
+
+local Frame = Instance.new("Frame")
+Frame.Size             = UDim2.new(0, GUI_W, 0, GUI_H)
+Frame.Position         = UDim2.new(0, 20, 0, 20)
+Frame.BackgroundColor3 = DARK
+Frame.BorderSizePixel  = 0
+Frame.Active           = true
+Frame.ClipsDescendants = true
+Frame.Parent           = ScreenGui
+Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+redStroke(Frame, 1.5)
+
+local Title = Instance.new("TextLabel")
+Title.Size               = UDim2.new(1, -80, 0, 26)
+Title.Position           = UDim2.new(0, 10, 0, 7)
+Title.BackgroundTransparency = 1
+Title.Text               = "Cursed Bypass"
+Title.TextColor3         = Color3.new(1, 1, 1)
+Title.TextSize           = 17
+Title.Font               = Enum.Font.Fantasy
+Title.TextXAlignment     = Enum.TextXAlignment.Left
+Title.TextYAlignment     = Enum.TextYAlignment.Center
+Title.Parent             = Frame
+local tGrad = Instance.new("UIGradient")
+tGrad.Color = TITLE_GRAD; tGrad.Rotation = 0; tGrad.Parent = Title
+animGrad(tGrad, 1.5)
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size             = UDim2.new(0, 24, 0, 24)
+MinBtn.Position         = UDim2.new(1, -58, 0, 8)
+MinBtn.BackgroundColor3 = BTN_BG
+MinBtn.BorderSizePixel  = 0
+MinBtn.Text             = "-"
+MinBtn.TextColor3       = RED
+MinBtn.TextSize         = 16
+MinBtn.Font             = Enum.Font.Fantasy
+MinBtn.Parent           = Frame
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
+redStroke(MinBtn, 1.5)
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size             = UDim2.new(0, 24, 0, 24)
+CloseBtn.Position         = UDim2.new(1, -30, 0, 8)
+CloseBtn.BackgroundColor3 = BTN_BG
+CloseBtn.BorderSizePixel  = 0
+CloseBtn.Text             = "×"
+CloseBtn.TextColor3       = RED
+CloseBtn.TextSize         = 18
+CloseBtn.Font             = Enum.Font.Fantasy
+CloseBtn.Parent           = Frame
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+redStroke(CloseBtn, 1.5)
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+local function makeSection(text, yPos)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(1, -20, 0, 14)
+    lbl.Position           = UDim2.new(0, 10, 0, yPos)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = text
+    lbl.TextColor3         = RED
+    lbl.TextSize           = 9
+    lbl.Font               = Enum.Font.GothamBlack
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.Parent             = Frame
+end
+
+local function makeToggleRow(labelText, yPos)
+    local row = Instance.new("Frame")
+    row.Position         = UDim2.new(0, 10, 0, yPos)
+    row.Size             = UDim2.new(1, -20, 0, 34)
+    row.BackgroundColor3 = ROW_BG
+    row.BorderSizePixel  = 0; row.Parent = Frame
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    redStroke(row, 1.5)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,-60,1,0); lbl.Position = UDim2.new(0,10,0,0)
+    lbl.BackgroundTransparency = 1; lbl.Text = labelText
+    lbl.TextColor3 = RED; lbl.TextSize = 13
+    lbl.Font = Enum.Font.Fantasy; lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = row
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(0,36,0,18); bg.Position = UDim2.new(1,-46,0.5,-9)
+    bg.BackgroundTransparency = 1; bg.BorderSizePixel = 0; bg.Parent = row
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 9)
+    redStroke(bg, 1.5)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0,14,0,14); knob.Position = UDim2.new(0,2,0.5,-7)
+    knob.BackgroundColor3 = RED; knob.BorderSizePixel = 0; knob.Parent = bg
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 7)
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1
+    btn.Text = ""; btn.Parent = row
+
+    return btn, knob, bg
+end
+
+local function makeSliderRow(labelText, yPos, minVal, maxVal, defaultVal)
+    local row = Instance.new("Frame")
+    row.Position         = UDim2.new(0, 10, 0, yPos)
+    row.Size             = UDim2.new(1, -20, 0, 50)
+    row.BackgroundColor3 = ROW_BG
+    row.BorderSizePixel  = 0; row.Parent = Frame
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    redStroke(row, 1.5)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0.7,0,0,20); lbl.Position = UDim2.new(0,10,0,5)
+    lbl.BackgroundTransparency = 1; lbl.Text = labelText
+    lbl.TextColor3 = RED; lbl.TextSize = 13
+    lbl.Font = Enum.Font.Fantasy; lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = row
+
+    local valLbl = Instance.new("TextLabel")
+    valLbl.Size = UDim2.new(0.3,0,0,20); valLbl.Position = UDim2.new(0.7,0,0,5)
+    valLbl.BackgroundTransparency = 1; valLbl.Text = tostring(defaultVal)
+    valLbl.TextColor3 = RED; valLbl.TextSize = 13
+    valLbl.Font = Enum.Font.Fantasy; valLbl.TextXAlignment = Enum.TextXAlignment.Right
+    valLbl.Parent = row
+
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(1,-20,0,6); track.Position = UDim2.new(0,10,0,32)
+    track.BackgroundColor3 = BTN_BG; track.BorderSizePixel = 0; track.Parent = row
+    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 3)
+    redStroke(track, 1)
+
+    local fill = Instance.new("Frame")
+    local startPct = (defaultVal - minVal) / (maxVal - minVal)
+    fill.Size = UDim2.new(startPct,0,1,0); fill.Position = UDim2.new(0,0,0,0)
+    fill.BackgroundColor3 = RED; fill.BorderSizePixel = 0; fill.Parent = track
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
+
+    local currentVal = defaultVal
+    local sliding = false
+
+    local function updateSlider(inputPos)
+        local trackAbsPos  = track.AbsolutePosition
+        local trackAbsSize = track.AbsoluteSize
+        local pct = math.clamp((inputPos.X - trackAbsPos.X) / trackAbsSize.X, 0, 1)
+        currentVal = math.floor(minVal + pct * (maxVal - minVal))
+        fill.Size  = UDim2.new(pct, 0, 1, 0)
+        valLbl.Text = tostring(currentVal)
+        return currentVal
+    end
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+            updateSlider(input.Position)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            updateSlider(input.Position)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
+    end)
+
+    return fill, valLbl, function() return currentVal end
+end
+
+local function makeKeybindRow(labelText, defaultKey, yPos)
+    local row = Instance.new("Frame")
+    row.Position         = UDim2.new(0, 10, 0, yPos)
+    row.Size             = UDim2.new(1, -20, 0, 34)
+    row.BackgroundColor3 = ROW_BG
+    row.BorderSizePixel  = 0; row.Parent = Frame
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    redStroke(row, 1.5)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0.55,0,1,0); lbl.Position = UDim2.new(0,10,0,0)
+    lbl.BackgroundTransparency = 1; lbl.Text = labelText
+    lbl.TextColor3 = RED; lbl.TextSize = 13
+    lbl.Font = Enum.Font.Fantasy; lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = row
+
+    local badge = Instance.new("Frame")
+    badge.Size             = UDim2.new(0, 50, 0, 22)
+    badge.Position         = UDim2.new(1, -58, 0.5, -11)
+    badge.BackgroundColor3 = BTN_BG
+    badge.BorderSizePixel  = 0; badge.Parent = row
+    Instance.new("UICorner", badge).CornerRadius = UDim.new(0, 6)
+    redStroke(badge, 1.5)
+
+    local valLbl = Instance.new("TextLabel")
+    valLbl.Size               = UDim2.new(1,0,1,0)
+    valLbl.BackgroundTransparency = 1
+    valLbl.Text               = defaultKey
+    valLbl.TextColor3         = RED
+    valLbl.TextSize           = 11
+    valLbl.Font               = Enum.Font.Fantasy
+    valLbl.TextXAlignment     = Enum.TextXAlignment.Center
+    valLbl.Parent             = badge
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1
+    btn.Text = ""; btn.Parent = row
+
+    return btn, valLbl
+end
+
+-- Build UI sections
+
+makeSection("BYPASS", 40)
+local ToggleBtn, ToggleKnob, ToggleBg = makeToggleRow("Bypass Speed", 56)
+
+makeSection("SPEED", 98)
+local _, SpeedValLbl, getBypassSpeed = makeSliderRow("Bypass Speed", 114, 50, 500, 100)
+
+makeSection("WALK SPEED", 172)
+local WalkToggleBtn, WalkToggleKnob, WalkToggleBg = makeToggleRow("Walk Speed", 188)
+local _, WalkValLbl, getWalkSpeed = makeSliderRow("Walk Amount", 230, 16, 500, 16)
+
+makeSection("KEYBINDS", 288)
+local KeyBtn,     KeyValLbl     = makeKeybindRow("Bypass Key",    "V", 304)
+local WalkKeyBtn, WalkKeyValLbl = makeKeybindRow("Walk Key",      "B", 344)
+
+-- Resize GUI to fit everything
+GUI_H = 390
+Frame.Size = UDim2.new(0, GUI_W, 0, GUI_H)
+
 --[[
-    ═══════════════════════════════════════════════════════
-                    RENDER RESTORE
-    ═══════════════════════════════════════════════════════
+    TOGGLE FUNCTIONS
 ]]
 
-RunService:BindToRenderStep("VoidRestore", Enum.RenderPriority.First.Value, function()
-    if hrp and clientCFrame and isAttacking then
-        pcall(RestorePosition)
+local function setEnabled(state)
+    enabled = state
+    local tw    = TweenInfo.new(0.15)
+    local goal  = state and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7)
+    local color = state and WINE or Color3.fromRGB(60, 10, 20)
+    local transp = state and 0 or 1
+    TweenService:Create(ToggleKnob, tw, {Position = goal, BackgroundColor3 = state and Color3.new(1,1,1) or RED}):Play()
+    TweenService:Create(ToggleBg,   tw, {BackgroundColor3 = color, BackgroundTransparency = transp}):Play()
+end
+
+local function setWalkEnabled(state)
+    walkEnabled = state
+    local tw    = TweenInfo.new(0.15)
+    local goal  = state and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7)
+    local color = state and WINE or Color3.fromRGB(60, 10, 20)
+    local transp = state and 0 or 1
+    TweenService:Create(WalkToggleKnob, tw, {Position = goal, BackgroundColor3 = state and Color3.new(1,1,1) or RED}):Play()
+    TweenService:Create(WalkToggleBg,   tw, {BackgroundColor3 = color, BackgroundTransparency = transp}):Play()
+
+    -- Reset walk speed on disable
+    if not state then
+        local char = LocalPlayer.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = 16 end
+        end
+    end
+end
+
+-- Update speeds from sliders
+RunService.Heartbeat:Connect(function()
+    BYPASS_SPEED = getBypassSpeed()
+    WALK_SPEED   = getWalkSpeed()
+end)
+
+--[[
+    BUTTON CONNECTIONS
+]]
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    setEnabled(not enabled)
+end)
+
+WalkToggleBtn.MouseButton1Click:Connect(function()
+    setWalkEnabled(not walkEnabled)
+end)
+
+KeyBtn.MouseButton1Click:Connect(function()
+    if listeningForKey then return end
+    listeningForKey      = true
+    KeyValLbl.Text       = "..."
+    KeyValLbl.TextColor3 = Color3.fromRGB(255, 200, 50)
+end)
+
+WalkKeyBtn.MouseButton1Click:Connect(function()
+    if listeningForWalkKey then return end
+    listeningForWalkKey      = true
+    WalkKeyValLbl.Text       = "..."
+    WalkKeyValLbl.TextColor3 = Color3.fromRGB(255, 200, 50)
+end)
+
+--[[
+    MINIMIZE / DRAG
+]]
+
+local function setMinimized(state)
+    minimized   = state
+    MinBtn.Text = state and "+" or "-"
+    TweenService:Create(Frame, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        Size = state and UDim2.new(0,GUI_W,0,GUI_MIN) or UDim2.new(0,GUI_W,0,GUI_H)
+    }):Play()
+end
+MinBtn.MouseButton1Click:Connect(function() setMinimized(not minimized) end)
+
+local dragging, dragStart, startPos = false, nil, nil
+
+Frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = Frame.Position
     end
 end)
 
---[[
-    ═══════════════════════════════════════════════════════
-                    SAFETY
-    ═══════════════════════════════════════════════════════
-]]
-
-LocalPlayer.CharacterAdded:Connect(function(character)
-    Config.Ragebot.Enabled = false
-    Config.AntiAim.Enabled = false
-    hrp = nil
-    clientCFrame = nil
-    isHiding = false
-    isAttacking = false
-end)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Config.Safety.EmergencyKey then
-        Config.Ragebot.Enabled = false
-        Config.AntiAim.Enabled = false
-        Config.Main.Enabled = false
-        isHiding = false
-        isAttacking = false
-        RestorePosition()
-        if camera then
-            camera.FieldOfView = 70
-        end
-        Rayfield:Notify({
-            Title = "Emergency Stop",
-            Content = "All features disabled!",
-            Duration = 3,
-        })
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch) then
+        if minimized then dragging = false; return end
+        local d = input.Position - dragStart
+        local s = workspace.CurrentCamera.ViewportSize
+        Frame.Position = UDim2.new(0,
+            math.clamp(startPos.X.Offset + d.X, 0, s.X - GUI_W), 0,
+            math.clamp(startPos.Y.Offset + d.Y, 0, s.Y - GUI_H))
     end
 end)
 
---[[
-    ═══════════════════════════════════════════════════════
-                    RAYFIELD UI
-    ═══════════════════════════════════════════════════════
-]]
-
-local Window = Rayfield:CreateWindow({
-    Name = "Rivals VoidSpam",
-    LoadingTitle = "Rivals VoidSpam",
-    LoadingSubtitle = "HvH Edition",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "RivalsVoidSpam",
-        FileName = "Config"
-    },
-    KeySystem = false,
-})
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+end)
 
 --[[
-    ═══════════════════════════════════════════════════════
-                    MAIN TAB
-    ═══════════════════════════════════════════════════════
+    KEYBIND INPUT
 ]]
 
-local MainTab = Window:CreateTab("Main", "home")
-local MainSection = MainTab:CreateSection("Main")
-
-MainTab:CreateToggle({
-    Name = "Enabled",
-    CurrentValue = false,
-    Flag = "MainEnabled",
-    Callback = function(Value)
-        Config.Main.Enabled = Value
-        if not Value then
-            -- Reset FOV on disable
-            if camera then
-                camera.FieldOfView = 70
-            end
+UserInputService.InputBegan:Connect(function(input, gpe)
+    -- Listening for bypass key
+    if listeningForKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            toggleKey            = input.KeyCode
+            KeyValLbl.Text       = input.KeyCode.Name
+            KeyValLbl.TextColor3 = RED
+            listeningForKey      = false
+            lastKeybindSet       = tick()
         end
-    end,
-})
+        return
+    end
 
-MainTab:CreateSlider({
-    Name = "Field Of View (°)",
-    Range = {70, 360},
-    Increment = 1,
-    Suffix = "/360",
-    CurrentValue = 360,
-    Flag = "MainFOV",
-    Callback = function(Value)
-        Config.Main.FOV = Value
-    end,
-})
-
---[[
-    ═══════════════════════════════════════════════════════
-                    RAGEBOT TAB
-    ═══════════════════════════════════════════════════════
-]]
-
-local RagebotTab = Window:CreateTab("Ragebot", "crosshair")
-local RagebotSection = RagebotTab:CreateSection("Ragebot")
-
-RagebotTab:CreateToggle({
-    Name = "Enabled",
-    CurrentValue = false,
-    Flag = "RagebotEnabled",
-    Callback = function(Value)
-        Config.Ragebot.Enabled = Value
-        if Value then
-            task.spawn(RagebotLoop)
+    -- Listening for walk key
+    if listeningForWalkKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            walkKey                  = input.KeyCode
+            WalkKeyValLbl.Text       = input.KeyCode.Name
+            WalkKeyValLbl.TextColor3 = RED
+            listeningForWalkKey      = false
+            lastWalkKeybindSet       = tick()
         end
-    end,
-})
+        return
+    end
 
-RagebotTab:CreateToggle({
-    Name = "Void Spam",
-    CurrentValue = false,
-    Flag = "VoidSpamEnabled",
-    Callback = function(Value)
-        Config.Ragebot.VoidSpam = Value
-    end,
-})
+    -- Bypass toggle key
+    if input.KeyCode == toggleKey and not gpe and (tick() - lastKeybindSet > 0.3) then
+        setEnabled(not enabled)
+    end
 
-RagebotTab:CreateSlider({
-    Name = "Hide Time",
-    Range = {0.05, 0.5},
-    Increment = 0.05,
-    Suffix = "s",
-    CurrentValue = 0.25,
-    Flag = "HideTime",
-    Callback = function(Value)
-        Config.Ragebot.HideTime = Value
-    end,
-})
-
-RagebotTab:CreateSlider({
-    Name = "Attack Time",
-    Range = {0.01, 0.5},
-    Increment = 0.01,
-    Suffix = "s",
-    CurrentValue = 0.1,
-    Flag = "AttackTime",
-    Callback = function(Value)
-        Config.Ragebot.AttackTime = Value
-    end,
-})
-
-RagebotTab:CreateSlider({
-    Name = "Shoot Attempts",
-    Range = {1, 2},
-    Increment = 1,
-    Suffix = "x",
-    CurrentValue = 1,
-    Flag = "ShootAttempts",
-    Callback = function(Value)
-        Config.Ragebot.ShootAttempts = Value
-    end,
-})
-
---[[
-    ═══════════════════════════════════════════════════════
-                    ANTI AIM TAB
-    ═══════════════════════════════════════════════════════
-]]
-
-local AntiAimTab = Window:CreateTab("Anti Aim", "shield")
-local AntiAimSection = AntiAimTab:CreateSection("Anti Aim")
-
-AntiAimTab:CreateToggle({
-    Name = "Enabled",
-    CurrentValue = false,
-    Flag = "AntiAimEnabled",
-    Callback = function(Value)
-        Config.AntiAim.Enabled = Value
-    end,
-})
-
--- Pitch Section
-AntiAimTab:CreateSection("Pitch")
-
-AntiAimTab:CreateDropdown({
-    Name = "Pitch",
-    Options = {"Off", "Up", "Zero", "Down", "Glitch", "Random"},
-    CurrentOption = {"Off"},
-    Flag = "AntiAimPitch",
-    Callback = function(Value)
-        Config.AntiAim.Pitch = Value[1]
-    end,
-})
-
--- Yaw Section
-AntiAimTab:CreateSection("Yaw")
-
-AntiAimTab:CreateDropdown({
-    Name = "Yaw Base",
-    Options = {"Local", "At Targets"},
-    CurrentOption = {"Local"},
-    Flag = "AntiAimYawBase",
-    Callback = function(Value)
-        Config.AntiAim.YawBase = Value[1]
-    end,
-})
-
-AntiAimTab:CreateDropdown({
-    Name = "Yaw",
-    Options = {"Off", "Forward", "Backward", "Spin", "Glitch Spin", "Stutter Spin"},
-    CurrentOption = {"Off"},
-    Flag = "AntiAimYaw",
-    Callback = function(Value)
-        Config.AntiAim.Yaw = Value[1]
-    end,
-})
-
-AntiAimTab:CreateSlider({
-    Name = "Yaw Angle (°)",
-    Range = {-180, 180},
-    Increment = 1,
-    Suffix = "°",
-    CurrentValue = 0,
-    Flag = "AntiAimYawAngle",
-    Callback = function(Value)
-        Config.AntiAim.YawAngle = Value
-    end,
-})
-
---[[
-    ═══════════════════════════════════════════════════════
-                    PRESETS TAB
-    ═══════════════════════════════════════════════════════
-]]
-
-local PresetsTab = Window:CreateTab("Presets", "star")
-local PresetsSection = PresetsTab:CreateSection("HvH Presets")
-
-PresetsTab:CreateButton({
-    Name = "Instant Kill",
-    Callback = function()
-        Config.Ragebot.HideTime = 0.05
-        Config.Ragebot.AttackTime = 0.05
-        Config.Ragebot.ShootAttempts = 2
-        Config.Ragebot.VoidSpam = true
-        Config.AntiAim.Pitch = "Down"
-        Config.AntiAim.Yaw = "Spin"
-        Config.AntiAim.YawBase = "Local"
-        Rayfield:Notify({
-            Title = "Preset Applied",
-            Content = "Instant Kill",
-            Duration = 3,
-        })
-    end,
-})
-
-PresetsTab:CreateButton({
-    Name = "Safe Peek",
-    Callback = function()
-        Config.Ragebot.HideTime = 0.1
-        Config.Ragebot.AttackTime = 0.05
-        Config.Ragebot.ShootAttempts = 2
-        Config.Ragebot.VoidSpam = true
-        Config.AntiAim.Pitch = "Up"
-        Config.AntiAim.Yaw = "Backward"
-        Config.AntiAim.YawBase = "At Targets"
-        Rayfield:Notify({
-            Title = "Preset Applied",
-            Content = "Safe Peek",
-            Duration = 3,
-        })
-    end,
-})
-
-PresetsTab:CreateButton({
-    Name = "Ghost Mode",
-    Callback = function()
-        Config.Ragebot.HideTime = 0.25
-        Config.Ragebot.AttackTime = 0.01
-        Config.Ragebot.ShootAttempts = 2
-        Config.Ragebot.VoidSpam = true
-        Config.AntiAim.Pitch = "Glitch"
-        Config.AntiAim.Yaw = "Glitch Spin"
-        Config.AntiAim.YawBase = "Local"
-        Rayfield:Notify({
-            Title = "Preset Applied",
-            Content = "Ghost Mode",
-            Duration = 3,
-        })
-    end,
-})
-
---[[
-    ═══════════════════════════════════════════════════════
-                    SETTINGS TAB
-    ═══════════════════════════════════════════════════════
-]]
-
-local SettingsTab = Window:CreateTab("Settings", "settings")
-local SettingsSection = SettingsTab:CreateSection("Safety")
-
-SettingsTab:CreateButton({
-    Name = "Emergency Stop (Delete Key)",
-    Callback = function()
-        Config.Ragebot.Enabled = false
-        Config.AntiAim.Enabled = false
-        Config.Main.Enabled = false
-        isHiding = false
-        isAttacking = false
-        RestorePosition()
-        if camera then
-            camera.FieldOfView = 70
-        end
-        Rayfield:Notify({
-            Title = "Emergency Stop",
-            Content = "All features disabled!",
-            Duration = 3,
-        })
-    end,
-})
-
-SettingsTab:CreateButton({
-    Name = "Unload Script",
-    Callback = function()
-        Config.Ragebot.Enabled = false
-        Config.AntiAim.Enabled = false
-        Config.Main.Enabled = false
-        isHiding = false
-        isAttacking = false
-        RestorePosition()
-        RunService:UnbindFromRenderStep("VoidRestore")
-        RunService:UnbindFromRenderStep("AntiAim")
-        RunService:UnbindFromRenderStep("FOV")
-        if camera then
-            camera.FieldOfView = 70
-        end
-        Rayfield:Destroy()
-    end,
-})
-
---[[
-    ═══════════════════════════════════════════════════════
-                    NOTIFY ON LOAD
-    ═══════════════════════════════════════════════════════
-]]
-
-Rayfield:Notify({
-    Title = "Rivals VoidSpam",
-    Content = "Loaded! Press Delete for emergency stop.",
-    Duration = 5,
-})
+    -- Walk speed toggle key
+    if input.KeyCode == walkKey and not gpe and (tick() - lastWalkKeybindSet > 0.3) then
+        setWalkEnabled(not walkEnabled)
+    end
+end)
